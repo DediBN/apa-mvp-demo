@@ -1,0 +1,32 @@
+@import url("https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap");
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  color-scheme: dark;
+}
+
+html,
+body {
+  height: 100%;
+}
+
+body {
+  @apply bg-command-bg text-command-text antialiased;
+  background-image: theme("backgroundImage.command-radial"), theme("backgroundImage.command-grid");
+  background-size: auto, 34px 34px;
+}
+
+* {
+  scrollbar-color: #1f3b51 #08141f;
+}
+
+.command-card {
+  @apply rounded-xl border border-command-border bg-command-panel shadow-panel;
+}
+
+.command-card-elevated {
+  @apply rounded-xl border border-command-border bg-command-panelElevated shadow-glow;
+}
