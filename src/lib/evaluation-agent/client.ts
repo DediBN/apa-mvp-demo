@@ -1,11 +1,18 @@
 import { AJD } from "../intake-agent/mock";
 import { Candidate } from "../research-agent/mock";
 
+export interface EvaluationTestResult {
+  test_name: string;
+  status: "Pass" | "Fail";
+  observation: string;
+}
+
 export interface EvaluationApiResult {
   candidate_id: string;
   candidate_name: string;
   analysis: string;
   fit_score: number;
+  test_results: EvaluationTestResult[];
 }
 
 export async function runEvaluation(ajd: AJD, candidates: Candidate[]): Promise<EvaluationApiResult[]> {

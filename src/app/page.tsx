@@ -1,4 +1,4 @@
-import { IntakeTerminal } from "../components/command-center/intake-terminal";
+import { CommandShell } from "../components/command-center/command-shell";
 import { StatusPill } from "../components/ui/status-pill";
 
 export default function HomePage() {
@@ -9,13 +9,15 @@ export default function HomePage() {
           <div>
             <p className="font-mono text-xs uppercase tracking-[0.22em] text-command-action animate-pulseLine">Agentic Process Authority</p>
             <h1 className="mt-2 text-2xl font-semibold tracking-tight text-command-text md:text-3xl">Meta-Agent Command Center</h1>
-            <p className="mt-2 max-w-2xl text-sm text-command-muted md:text-base">4-step automated flow: Intake → Sourcing Radar → Evaluation → Final Scorecard with ROI projection.</p>
+            <p className="mt-2 max-w-2xl text-sm text-command-muted md:text-base">
+              Acquisition pipeline and live fleet management for your deployed AI agents.
+            </p>
           </div>
           <StatusPill label="Full Demo Live" tone="action" />
         </div>
       </section>
 
-      <IntakeTerminal />
+      <CommandShell />
     </main>
   );
 }
