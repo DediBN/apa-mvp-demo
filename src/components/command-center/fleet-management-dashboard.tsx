@@ -4,6 +4,19 @@ import { useState } from "react";
 import { ActiveAgent, AgentHealthStatus, ACTIVE_FLEET, OrchestrationLink, OptimizationAlert } from "../../lib/fleet/mock";
 import { StatusPill } from "../ui/status-pill";
 
+// ─── Types ───────────────────────────────────────────────────────────────────
+
+interface ConflictState {
+  active: boolean;
+  agentAId: string;
+  agentBId: string;
+  description: string;
+  agentAPosition: string;
+  agentBPosition: string;
+  resolved: boolean;
+  resolutionMessage?: string;
+}
+
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
 function formatCurrency(value: number): string {
@@ -142,11 +155,17 @@ function MetricChip({ label, value }: { label: string; value: string }) {
 
 // ─── Agent Card ───────────────────────────────────────────────────────────────
 
-function AgentCard({ agent }: { agent: ActiveAgent }) {
+function AgentCard({ agent, isInConflict, conflictResolved }: { agent: ActiveAgent; isInConflict: boolean; conflictResolved: boolean }) {
   const [expanded, setExpanded] = useState(false);
+  
+  const borderClass = isInConflict && !conflictResolved
+    ? "border-command-fail"
+    : conflictResolved
+    ? "border-command-pass animate-pulse"
+    : "border-command-border";
 
   return (
-    <article className="command-card-elevated flex flex-col gap-4 p-5 animate-fadeUp">
+    <article className={`command-card-elevated flex flex-col gap-4 p-5 animate-fadeUp border-2 ${borderClass} transition-all`}>
       {/* Header */}
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div className="flex items-center gap-3">
@@ -250,9 +269,119 @@ function FleetSummaryBar({ agents }: { agents: ActiveAgent[] }) {
   );
 }
 
+// ─── Conflict Detection Panel ────────────────────────────────────────────────
+
+function ConflictDetectionPanel({ conflict, onResolve }: { conflict: ConflictState; onResolve: () => void }) {
+  const agentA = ACTIVE_FLEET.find((a) => a.id === conflict.agentAId);
+  const agentB = ACTIVE_FLEET.find((a) => a.id === conflict.agentBId);
+
+  if (!agentA || !agentB) return null;
+
+  if (conflict.resolved && conflict.resolutionMessage) {
+    return (
+      <div className="rounded-lg border border-command-pass/50 bg-command-pass/10 p-4 animate-fadeUp">
+        <div className="flex items-start gap-3">
+          <span className="text-lg">✓</span>
+          <div className="flex-1">
+            <p className="font-mono text-sm font-semibold uppercase tracking-[0.12em] text-command-pass">
+              {conflict.resolutionMessage}
+            </p>
+            <p className="mt-2 text-xs text-command-text">
+              Shared context updated. Both agents now operating under unified policy constraints.
+            </p>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="rounded-lg border border-command-fail/50 bg-command-fail/10 p-4 animate-fadeUp">
+      <div className="space-y-4">
+        <div>
+          <p className="font-mono text-xs font-semibold uppercase tracking-[0.14em] text-command-fail">
+            ⚠ Urgent: Conflict Detected
+          </p>
+          <p className="mt-1 text-sm text-command-text">{conflict.description}</p>
+        </div>
+
+        {/* Agent positions */}
+        <div className="grid grid-cols-2 gap-3">
+          <div className="rounded border border-command-fail/30 bg-command-fail/5 p-3">
+            <p className="font-mono text-[10px] uppercase tracking-[0.12em] text-command-muted">
+              Agent A
+            </p>
+            <p className="mt-1 text-xs font-semibold text-command-text">{agentA.name}</p>
+            <p className="mt-2 text-xs text-command-text">{conflict.agentAPosition}</p>
+          </div>
+          <div className="rounded border border-command-fail/30 bg-command-fail/5 p-3">
+            <p className="font-mono text-[10px] uppercase tracking-[0.12em] text-command-muted">
+              Agent B
+            </p>
+            <p className="mt-1 text-xs font-semibold text-command-text">{agentB.name}</p>
+            <p className="mt-2 text-xs text-command-text">{conflict.agentBPosition}</p>
+          </div>
+        </div>
+
+        {/* Resolution button */}
+        <button
+          type="button"
+          onClick={onResolve}
+          className="w-full rounded-lg border border-command-action bg-command-action/10 px-3 py-2 font-mono text-xs font-semibold uppercase tracking-[0.12em] text-command-action transition hover:bg-command-action/20"
+        >
+          Apply Priority: Service Agent Policy
+        </button>
+      </div>
+    </div>
+  );
+}
+
 // ─── Main ─────────────────────────────────────────────────────────────────────
 
 export function FleetManagementDashboard() {
+  const [conflict, setConflict] = useState<ConflictState>({
+    active: false,
+    agentAId: "",
+    agentBId: "",
+    description: "",
+    agentAPosition: "",
+    agentBPosition: "",
+    resolved: false
+  });
+
+  const handleSimulateConflict = () => {
+    setConflict({
+      active: true,
+      agentAId: "agent_prod_002",
+      agentBId: "agent_prod_001",
+      description: "Pricing Policy Overlap - Conflicting discount authority",
+      agentAPosition: "Wants to grant 20% customer discount for strategic account",
+      agentBPosition: "Enforcing 10% maximum discount limit per policy",
+      resolved: false
+    });
+  };
+
+  const handleResolveConflict = () => {
+    setTimeout(() => {
+      setConflict((prev) => ({
+        ...prev,
+        resolved: true,
+        resolutionMessage: "Shared Context Updated. Orchestration Restored."
+      }));
+      setTimeout(() => {
+        setConflict({
+          active: false,
+          agentAId: "",
+          agentBId: "",
+          description: "",
+          agentAPosition: "",
+          agentBPosition: "",
+          resolved: false
+        });
+      }, 3500);
+    }, 800);
+  };
+
   return (
     <section className="space-y-5 animate-fadeUp">
       {/* Section header */}
@@ -266,12 +395,27 @@ export function FleetManagementDashboard() {
               Active Agent Registry
             </h2>
             <p className="mt-1 text-sm text-command-muted">
-              Live monitoring, orchestration links, and optimization recommendations.
+              Live monitoring, orchestration links, and conflict resolution.
             </p>
           </div>
-          <StatusPill label="LIVE" tone="pass" />
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={handleSimulateConflict}
+              disabled={conflict.active}
+              className="rounded-lg border border-command-warning/60 bg-command-warning/10 px-3 py-2 font-mono text-xs font-semibold text-command-warning transition hover:bg-command-warning/20 disabled:opacity-45 disabled:cursor-not-allowed"
+            >
+              {conflict.active ? "Conflict Active" : "↻ Simulate Conflict"}
+            </button>
+            <StatusPill label="LIVE" tone="pass" />
+          </div>
         </div>
       </div>
+
+      {/* Conflict detection (if active) */}
+      {conflict.active ? (
+        <ConflictDetectionPanel conflict={conflict} onResolve={handleResolveConflict} />
+      ) : null}
 
       {/* Summary bar */}
       <FleetSummaryBar agents={ACTIVE_FLEET} />
@@ -279,7 +423,12 @@ export function FleetManagementDashboard() {
       {/* Agent cards grid */}
       <div className="grid gap-4 lg:grid-cols-3">
         {ACTIVE_FLEET.map((agent) => (
-          <AgentCard key={agent.id} agent={agent} />
+          <AgentCard
+            key={agent.id}
+            agent={agent}
+            isInConflict={conflict.active && (conflict.agentAId === agent.id || conflict.agentBId === agent.id)}
+            conflictResolved={conflict.resolved && (conflict.agentAId === agent.id || conflict.agentBId === agent.id)}
+          />
         ))}
       </div>
     </section>
