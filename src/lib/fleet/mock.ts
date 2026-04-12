@@ -87,6 +87,11 @@ export const ACTIVE_FLEET: ActiveAgent[] = [
       { targetName: "NetSuite ERP", targetType: "ERP", messagesPerHour: 190 },
       { targetName: "Invoice Processing Agent", targetType: "AGENT", messagesPerHour: 95 }
     ],
-    alert: null
+    alert: {
+      type: "NEW_ALTERNATIVE",
+      alternativeScore: 94,
+      roiGainPerYear: 142000,
+      suggestedSource: "Claude 3.5 Sonnet"
+    }
   }
 ];

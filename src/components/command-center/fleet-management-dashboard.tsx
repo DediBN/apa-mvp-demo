@@ -17,6 +17,14 @@ interface ConflictState {
   resolutionMessage?: string;
 }
 
+interface UpgradeModalState {
+  active: boolean;
+  agentId: string;
+  isUpgrading: boolean;
+  upgradeProgress: number;
+  upgraded: boolean;
+}
+
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
 function formatCurrency(value: number): string {
@@ -113,7 +121,7 @@ function OrchestrationLinks({ links }: { links: OrchestrationLink[] }) {
   );
 }
 
-function OptimizationAlertBadge({ alert }: { alert: OptimizationAlert }) {
+function OptimizationAlertBadge({ alert, onViewComparison }: { alert: OptimizationAlert; onViewComparison: () => void }) {
   return (
     <div className="rounded-lg border border-command-warning/50 bg-command-warning/8 p-3">
       <div className="flex items-start gap-2">
@@ -135,9 +143,10 @@ function OptimizationAlertBadge({ alert }: { alert: OptimizationAlert }) {
         </div>
         <button
           type="button"
+          onClick={onViewComparison}
           className="ml-auto flex-shrink-0 rounded border border-command-warning/50 px-2 py-1 font-mono text-[10px] uppercase tracking-wide text-command-warning transition hover:bg-command-warning/10"
         >
-          Review
+          View Comparison
         </button>
       </div>
     </div>
@@ -155,7 +164,7 @@ function MetricChip({ label, value }: { label: string; value: string }) {
 
 // ─── Agent Card ───────────────────────────────────────────────────────────────
 
-function AgentCard({ agent, isInConflict, conflictResolved }: { agent: ActiveAgent; isInConflict: boolean; conflictResolved: boolean }) {
+function AgentCard({ agent, isInConflict, conflictResolved, onViewUpgrade }: { agent: ActiveAgent; isInConflict: boolean; conflictResolved: boolean; onViewUpgrade: (agentId: string) => void }) {
   const [expanded, setExpanded] = useState(false);
   
   const borderClass = isInConflict && !conflictResolved
@@ -200,7 +209,7 @@ function AgentCard({ agent, isInConflict, conflictResolved }: { agent: ActiveAge
       <OrchestrationLinks links={agent.orchestrationLinks} />
 
       {/* Optimization alert */}
-      {agent.alert ? <OptimizationAlertBadge alert={agent.alert} /> : null}
+      {agent.alert ? <OptimizationAlertBadge alert={agent.alert} onViewComparison={() => onViewUpgrade(agent.id)} /> : null}
 
       {/* Expandable detail footer */}
       <button
@@ -265,6 +274,161 @@ function FleetSummaryBar({ agents }: { agents: ActiveAgent[] }) {
           ⚠ {degraded} agent{degraded > 1 ? "s" : ""} operating in DEGRADED state — review recommended.
         </p>
       )}
+    </div>
+  );
+}
+
+// ─── Upgrade Comparison Modal ────────────────────────────────────────────────
+
+function UpgradeComparisonModal({
+  agent,
+  alert,
+  isOpen,
+  isUpgrading,
+  upgradeProgress,
+  onApprove,
+  onClose
+}: {
+  agent: ActiveAgent;
+  alert: OptimizationAlert;
+  isOpen: boolean;
+  isUpgrading: boolean;
+  upgradeProgress: number;
+  onApprove: () => void;
+  onClose: () => void;
+}) {
+  if (!isOpen) return null;
+
+  const annualSavingsGain = alert.roiGainPerYear;
+  const currentMonthlyROI = agent.monthlyROI;
+  const newMonthlyROI = Math.round(currentMonthlyROI * 1.15);
+  const newCompositeScore = Math.round(agent.compositeScore * 1.1);
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-command-bg/80 backdrop-blur-sm animate-fadeUp">
+      <div className="w-full max-w-2xl rounded-xl border border-command-border bg-command-panelElevated p-6 shadow-glow">
+        {/* Header */}
+        <div className="mb-6 flex items-center justify-between">
+          <h3 className="text-lg font-semibold text-command-text">Smart Replacement Analysis</h3>
+          <button
+            type="button"
+            onClick={onClose}
+            disabled={isUpgrading}
+            className="text-command-muted transition hover:text-command-action disabled:opacity-45"
+          >
+            ✕
+          </button>
+        </div>
+
+        {!isUpgrading ? (
+          <>
+            {/* Side-by-side comparison */}
+            <div className="grid grid-cols-2 gap-4 mb-6">
+              {/* Current agent */}
+              <div className="rounded-lg border border-command-border bg-command-bg/60 p-4">
+                <p className="font-mono text-xs uppercase tracking-[0.12em] text-command-muted">Current Agent</p>
+                <p className="mt-2 text-sm font-semibold text-command-text">{agent.name}</p>
+                <div className="mt-4 space-y-2 text-xs">
+                  <p>
+                    <span className="text-command-muted">Source:</span>{" "}
+                    <span className="text-command-text">{agent.source}</span>
+                  </p>
+                  <p>
+                    <span className="text-command-muted">Composite:</span>{" "}
+                    <span className="text-command-text font-mono">{agent.compositeScore}/100</span>
+                  </p>
+                  <p>
+                    <span className="text-command-muted">Monthly ROI:</span>{" "}
+                    <span className="text-command-text font-mono">{formatCurrency(currentMonthlyROI)}</span>
+                  </p>
+                  <p>
+                    <span className="text-command-muted">Latency:</span>{" "}
+                    <span className="text-command-text font-mono">{agent.avgLatencyMs}ms</span>
+                  </p>
+                </div>
+              </div>
+
+              {/* New candidate */}
+              <div className="rounded-lg border border-command-pass/40 bg-command-pass/5 p-4">
+                <p className="font-mono text-xs uppercase tracking-[0.12em] text-command-pass">New Candidate</p>
+                <p className="mt-2 text-sm font-semibold text-command-text">{alert.suggestedSource} Agent (Optimized)</p>
+                <div className="mt-4 space-y-2 text-xs">
+                  <p>
+                    <span className="text-command-muted">Source:</span>{" "}
+                    <span className="text-command-pass">{alert.suggestedSource}</span>
+                  </p>
+                  <p>
+                    <span className="text-command-muted">Composite:</span>{" "}
+                    <span className="text-command-pass font-mono">{newCompositeScore}/100</span>
+                    <span className="text-command-pass ml-1 text-[10px]">
+                      (+{newCompositeScore - agent.compositeScore})
+                    </span>
+                  </p>
+                  <p>
+                    <span className="text-command-muted">Monthly ROI:</span>{" "}
+                    <span className="text-command-pass font-mono">{formatCurrency(newMonthlyROI)}</span>
+                    <span className="text-command-pass ml-1 text-[10px]">
+                      (+{formatCurrency(newMonthlyROI - currentMonthlyROI)})
+                    </span>
+                  </p>
+                  <p>
+                    <span className="text-command-muted">Latency:</span>{" "}
+                    <span className="text-command-pass font-mono">~950ms</span>
+                  </p>
+                </div>
+              </div>
+            </div>
+
+            {/* Annual savings gain highlight */}
+            <div className="rounded-lg border border-command-action/40 bg-command-action/10 p-4 mb-6">
+              <p className="font-mono text-xs uppercase tracking-[0.12em] text-command-action">Annual Savings Gain</p>
+              <p className="mt-2 text-2xl font-bold text-command-action">
+                {formatCurrency(annualSavingsGain)}/year
+              </p>
+              <p className="mt-1 text-xs text-command-muted">
+                By switching to {alert.suggestedSource}, you'll save an additional{" "}
+                <span className="text-command-action font-semibold">{formatCurrency(annualSavingsGain)}</span> annually through improved ROI and lower API costs.
+              </p>
+            </div>
+
+            {/* Action buttons */}
+            <div className="flex gap-2">
+              <button
+                type="button"
+                onClick={onClose}
+                className="flex-1 rounded-lg border border-command-border bg-command-panel px-4 py-2 font-mono text-sm text-command-muted transition hover:border-command-action hover:text-command-action"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={onApprove}
+                className="flex-1 rounded-lg border border-command-action bg-command-action/10 px-4 py-2 font-mono text-sm font-semibold text-command-action transition hover:bg-command-action/20"
+              >
+                Approve Upgrade
+              </button>
+            </div>
+          </>
+        ) : (
+          <>
+            {/* Upgrade progress */}
+            <div className="space-y-4">
+              <p className="text-sm text-command-muted">
+                Deploying new model and transferring state...
+              </p>
+              <div className="overflow-hidden rounded-lg border border-command-border bg-command-bg">
+                <div
+                  className="h-2 bg-gradient-to-r from-command-action via-command-action to-command-pass transition-all duration-300"
+                  style={{ width: `${upgradeProgress}%` }}
+                />
+              </div>
+              <p className="text-center font-mono text-xs text-command-muted">
+                {upgradeProgress}%
+              </p>
+            </div>
+          </>
+        )}
+      </div>
     </div>
   );
 }
@@ -349,6 +513,16 @@ export function FleetManagementDashboard() {
     resolved: false
   });
 
+  const [upgradeModal, setUpgradeModal] = useState<UpgradeModalState>({
+    active: false,
+    agentId: "",
+    isUpgrading: false,
+    upgradeProgress: 0,
+    upgraded: false
+  });
+
+  const [upgradedAgents, setUpgradedAgents] = useState<Set<string>>(new Set());
+
   const handleSimulateConflict = () => {
     setConflict({
       active: true,
@@ -381,6 +555,48 @@ export function FleetManagementDashboard() {
       }, 3500);
     }, 800);
   };
+
+  const handleViewUpgrade = (agentId: string) => {
+    setUpgradeModal({
+      active: true,
+      agentId,
+      isUpgrading: false,
+      upgradeProgress: 0,
+      upgraded: false
+    });
+  };
+
+  const handleApproveUpgrade = () => {
+    const agentIdToUpgrade = upgradeModal.agentId;
+    setUpgradeModal((prev) => ({ ...prev, isUpgrading: true, upgradeProgress: 0 }));
+
+    const progressInterval = setInterval(() => {
+      setUpgradeModal((prev) => {
+        const newProgress = prev.upgradeProgress + Math.random() * 25;
+        if (newProgress >= 100) {
+          clearInterval(progressInterval);
+          setUpgradedAgents((prevSet) => new Set(prevSet).add(agentIdToUpgrade));
+          setTimeout(() => {
+            setUpgradeModal((p) => ({ ...p, upgraded: true }));
+            setTimeout(() => {
+              setUpgradeModal({ active: false, agentId: "", isUpgrading: false, upgradeProgress: 0, upgraded: false });
+            }, 1500);
+          }, 300);
+          return { ...prev, upgradeProgress: 100 };
+        }
+        return { ...prev, upgradeProgress: newProgress };
+      });
+    }, 400);
+  };
+
+  const handleCloseUpgradeModal = () => {
+    if (!upgradeModal.isUpgrading) {
+      setUpgradeModal({ active: false, agentId: "", isUpgrading: false, upgradeProgress: 0, upgraded: false });
+    }
+  };
+
+  const currentAgent = ACTIVE_FLEET.find((a) => a.id === upgradeModal.agentId);
+  const currentAlert = currentAgent?.alert;
 
   return (
     <section className="space-y-5 animate-fadeUp">
@@ -417,6 +633,19 @@ export function FleetManagementDashboard() {
         <ConflictDetectionPanel conflict={conflict} onResolve={handleResolveConflict} />
       ) : null}
 
+      {/* Upgrade comparison modal */}
+      {currentAgent && currentAlert ? (
+        <UpgradeComparisonModal
+          agent={currentAgent}
+          alert={currentAlert}
+          isOpen={upgradeModal.active}
+          isUpgrading={upgradeModal.isUpgrading}
+          upgradeProgress={upgradeModal.upgradeProgress}
+          onApprove={handleApproveUpgrade}
+          onClose={handleCloseUpgradeModal}
+        />
+      ) : null}
+
       {/* Summary bar */}
       <FleetSummaryBar agents={ACTIVE_FLEET} />
 
@@ -428,6 +657,7 @@ export function FleetManagementDashboard() {
             agent={agent}
             isInConflict={conflict.active && (conflict.agentAId === agent.id || conflict.agentBId === agent.id)}
             conflictResolved={conflict.resolved && (conflict.agentAId === agent.id || conflict.agentBId === agent.id)}
+            onViewUpgrade={handleViewUpgrade}
           />
         ))}
       </div>
