@@ -24,6 +24,7 @@ export interface CandidateScorecard {
 export interface CandidateEvaluationResult {
   candidateId: string;
   candidateName: string;
+  candidateSource: "OpenAI" | "Hugging Face" | "CrewAI";
   objectionPasses: number;
   hallucinationPasses: number;
   scorecard: CandidateScorecard;

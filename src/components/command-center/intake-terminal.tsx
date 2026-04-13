@@ -8,6 +8,7 @@ import { StatusPill } from "../ui/status-pill";
 import { SourcingRadar } from "./sourcing-radar";
 import { EvaluationCommandCenter } from "./evaluation-command-center";
 import { FinalScorecardDashboard } from "./final-scorecard-dashboard";
+import { DetailedCandidateScorecard } from "./detailed-candidate-scorecard";
 import { Candidate } from "../../lib/research-agent/mock";
 import { CandidateEvaluationResult } from "../../lib/evaluation-agent/mock";
 
@@ -32,6 +33,7 @@ export function IntakeTerminal() {
   const [isGenerating, setIsGenerating] = useState(false);
   const [shortlist, setShortlist] = useState<Candidate[]>([]);
   const [evaluationResults, setEvaluationResults] = useState<CandidateEvaluationResult[]>([]);
+  const [selectedCandidateId, setSelectedCandidateId] = useState<string | null>(null);
   const [logs, setLogs] = useState<string[]>([
     `[${buildTimestamp()}] System ready. State=IDLE`
   ]);
@@ -106,6 +108,10 @@ export function IntakeTerminal() {
   const handleEvaluationFail = (reason: string) => {
     setStatus((prev) => reduceAPA(prev, { type: "FAIL", reason }));
     addLog(`Evaluation error: ${reason}`);
+  };
+
+  const handleCandidateSelection = (candidateId: string) => {
+    setSelectedCandidateId(candidateId);
   };
 
   const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
@@ -223,6 +229,7 @@ export function IntakeTerminal() {
     setReviewKpis("");
     setShortlist([]);
     setEvaluationResults([]);
+    setSelectedCandidateId(null);
     addLog("Run reset. State=IDLE");
   };
 
@@ -391,6 +398,7 @@ export function IntakeTerminal() {
           addLog={addLog}
           onEvaluationDone={handleEvaluationDone}
           onFail={handleEvaluationFail}
+          onCandidateSelected={handleCandidateSelection}
         />
       </div>
 
@@ -400,8 +408,21 @@ export function IntakeTerminal() {
           evaluationResults={evaluationResults}
           onDeploy={handleDeploy}
           addLog={addLog}
+          onCandidateSelected={handleCandidateSelection}
         />
       </div>
+
+      {selectedCandidateId && evaluationResults.length > 0 ? (
+        (() => {
+          const selected = evaluationResults.find((r) => r.candidateId === selectedCandidateId);
+          return selected ? (
+            <DetailedCandidateScorecard
+              result={selected}
+              onClose={() => setSelectedCandidateId(null)}
+            />
+          ) : null;
+        })()
+      ) : null}
     </section>
   );
 }

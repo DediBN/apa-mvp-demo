@@ -32,6 +32,7 @@ interface EvaluationCommandCenterProps {
   onEvaluationDone: (results: CandidateEvaluationResult[]) => void;
   onFail: (reason: string) => void;
   addLog: (line: string) => void;
+  onCandidateSelected?: (candidateId: string) => void;
 }
 
 const TOTALS = {
@@ -198,7 +199,7 @@ function normalizeTestResults(result?: EvaluationApiResult): EvaluationTestResul
   return cleaned;
 }
 
-export function EvaluationCommandCenter({ status, ajd, candidates, onEvaluationDone, onFail, addLog }: EvaluationCommandCenterProps) {
+export function EvaluationCommandCenter({ status, ajd, candidates, onEvaluationDone, onFail, addLog, onCandidateSelected }: EvaluationCommandCenterProps) {
   const [lanes, setLanes] = useState<EvaluationLane[]>([]);
   const [isRunning, setIsRunning] = useState(false);
   const completedRef = useRef(false);
@@ -281,6 +282,7 @@ export function EvaluationCommandCenter({ status, ajd, candidates, onEvaluationD
           return {
             candidateId: candidate.candidate_id,
             candidateName: candidate.name,
+            candidateSource: candidate.source,
             objectionPasses: Math.round((scorecard.objectionHandlingScore / 100) * TOTALS.objection),
             hallucinationPasses: Math.round((scorecard.hallucinationControlScore / 100) * TOTALS.hallucination),
                 analysis,
@@ -400,9 +402,26 @@ export function EvaluationCommandCenter({ status, ajd, candidates, onEvaluationD
         {lanes.map((lane) => {
           const objectionPct = Math.round((lane.objectionDone / TOTALS.objection) * 100);
           const hallucinationPct = Math.round((lane.hallucinationDone / TOTALS.hallucination) * 100);
+          const canShowDetail = !!lane.scorecard && !!onCandidateSelected;
 
           return (
-            <article key={lane.candidate.candidate_id} className="command-card p-4">
+            <article
+              key={lane.candidate.candidate_id}
+              className={`command-card p-4 ${canShowDetail ? "cursor-pointer transition-all hover:border-command-action/60 hover:shadow-lg hover:shadow-command-action/20 hover:bg-command-action/5" : ""}`}
+              onClick={() => {
+                if (canShowDetail) {
+                  onCandidateSelected(lane.candidate.candidate_id);
+                }
+              }}
+              role={canShowDetail ? "button" : undefined}
+              tabIndex={canShowDetail ? 0 : undefined}
+              onKeyDown={(e) => {
+                if (canShowDetail && (e.key === "Enter" || e.key === " ")) {
+                  e.preventDefault();
+                  onCandidateSelected(lane.candidate.candidate_id);
+                }
+              }}
+            >
               <div className="flex items-center justify-between gap-2">
                 <h3 className="text-sm font-semibold text-command-text">{lane.candidate.name}</h3>
                 <span className="rounded-full border border-command-action/50 px-2 py-1 font-mono text-[10px] uppercase tracking-[0.14em] text-command-action">

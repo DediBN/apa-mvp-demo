@@ -15,7 +15,8 @@ const config: Config = {
           action: "#64FFDA",
           pass: "#2FCC71",
           fail: "#FF6B6B",
-          warning: "#FFC857"
+          warning: "#FFC857",
+          success: "#2FCC71"
         }
       },
       boxShadow: {
@@ -45,12 +46,22 @@ const config: Config = {
         fadeUp: {
           "0%": { opacity: "0", transform: "translateY(6px)" },
           "100%": { opacity: "1", transform: "translateY(0)" }
+        },
+        fadeIn: {
+          "0%": { opacity: "0" },
+          "100%": { opacity: "1" }
+        },
+        slideUp: {
+          "0%": { opacity: "0", transform: "translateY(12px)" },
+          "100%": { opacity: "1", transform: "translateY(0)" }
         }
       },
       animation: {
         pulseLine: "pulseLine 2.2s ease-in-out infinite",
         radarSweep: "radarSweep 2.4s linear infinite",
-        fadeUp: "fadeUp 0.45s ease-out"
+        fadeUp: "fadeUp 0.45s ease-out",
+        fadeIn: "fadeIn 0.35s ease-out",
+        slideUp: "slideUp 0.4s ease-out"
       }
     }
   },

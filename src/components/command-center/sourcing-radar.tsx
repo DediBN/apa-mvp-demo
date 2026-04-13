@@ -204,7 +204,7 @@ export function SourcingRadar({ status, ajd, onShortlistReady, onFail, addLog }:
               <p className="font-mono text-xs text-command-muted">No candidates surfaced yet.</p>
             ) : (
               visibleCandidates.map((candidate) => (
-                <article key={candidate.candidate_id} className="rounded-lg border border-command-border bg-command-bg/80 p-3 animate-fadeUp shadow-glow">
+                <article key={candidate.candidate_id} className="rounded-lg border border-command-border bg-command-bg/80 p-3 animate-fadeUp shadow-glow hover:border-command-action/50 hover:bg-command-action/5 hover:shadow-lg hover:shadow-command-action/10 transition-all">
                   <div className="flex items-center justify-between gap-2">
                     <h3 className="text-sm font-semibold text-command-text">{candidate.name}</h3>
                     <span className={`rounded-full border px-2 py-1 font-mono text-[10px] uppercase tracking-[0.14em] ${sourceTone(candidate.source)}`}>

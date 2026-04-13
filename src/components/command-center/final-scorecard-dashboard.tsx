@@ -147,6 +147,7 @@ interface FinalScorecardDashboardProps {
   evaluationResults: CandidateEvaluationResult[];
   onDeploy: () => void;
   addLog: (line: string) => void;
+  onCandidateSelected?: (candidateId: string) => void;
 }
 
 export function FinalScorecardDashboard({
@@ -154,6 +155,7 @@ export function FinalScorecardDashboard({
   evaluationResults,
   onDeploy,
   addLog: _addLog,
+  onCandidateSelected
 }: FinalScorecardDashboardProps) {
   const isVisible =
     status.state === "COMPLETE" || status.state === "SCORECARD";
@@ -273,11 +275,20 @@ export function FinalScorecardDashboard({
               return (
                 <div
                   key={result.candidateId}
-                  className={`rounded-lg border p-3 ${
+                  onClick={() => onCandidateSelected?.(result.candidateId)}
+                  className={`rounded-lg border p-3 cursor-pointer transition-all ${
                     idx === 0
-                      ? "border-command-action/40 bg-command-action/5"
-                      : "border-command-border bg-command-bg/50"
+                      ? "border-command-action/40 bg-command-action/5 hover:border-command-action/60 hover:shadow-lg hover:shadow-command-action/20"
+                      : "border-command-border bg-command-bg/50 hover:border-command-action/40 hover:shadow-lg hover:shadow-command-action/15"
                   }`}
+                  role="button"
+                  tabIndex={0}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter" || e.key === " ") {
+                      e.preventDefault();
+                      onCandidateSelected?.(result.candidateId);
+                    }
+                  }}
                 >
                   <div className="flex items-center justify-between gap-2">
                     <div className="flex items-center gap-2">
