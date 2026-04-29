@@ -1,4 +1,8 @@
+"use client";
+
+import { useState } from "react";
 import { formatCurrency } from "../../lib/scorecard/roi";
+import { AgentProfileModal } from "./agent-profile-modal";
 
 interface ResultSummaryCardProps {
   selectedAgentName: string;
@@ -6,6 +10,10 @@ interface ResultSummaryCardProps {
   estimatedSavings: number;
   performanceImprovement?: number;
   useCaseSummary?: string;
+  domainHint?: string;
+  selectedAgentSource: "OpenAI" | "Hugging Face" | "CrewAI";
+  compositeScore: number;
+  savingsPercent: number;
 }
 
 export function ResultSummaryCard({
@@ -13,8 +21,14 @@ export function ResultSummaryCard({
   roiValue,
   estimatedSavings,
   performanceImprovement,
-  useCaseSummary
+  useCaseSummary,
+  domainHint,
+  selectedAgentSource,
+  compositeScore,
+  savingsPercent
 }: ResultSummaryCardProps) {
+  const [isAgentProfileOpen, setIsAgentProfileOpen] = useState(false);
+
   // Build a concise, human-readable mirror of the raw input.
   // Lowercases the first character, trims trailing punctuation, and caps at ~12 words.
   const intentMirror = (() => {
@@ -49,6 +63,13 @@ export function ResultSummaryCard({
         <h3 className="mt-3 text-3xl font-bold tracking-tight text-command-text md:text-4xl">
           {selectedAgentName}
         </h3>
+        <button
+          type="button"
+          onClick={() => setIsAgentProfileOpen(true)}
+          className="mt-2 rounded-lg border border-command-action/55 bg-command-action/10 px-3 py-1.5 font-mono text-xs font-semibold text-command-action transition hover:bg-command-action/20"
+        >
+          View Agent Profile
+        </button>
         <p className="mx-auto mt-3 max-w-xl text-sm text-command-muted md:text-base">
           This agent delivers the highest ROI and operational efficiency for that problem.
           Expected to significantly reduce manual workload within the first weeks of deployment.
@@ -96,6 +117,16 @@ export function ResultSummaryCard({
           </div>
         ) : null}
       </div>
+
+      <AgentProfileModal
+        isOpen={isAgentProfileOpen}
+        onClose={() => setIsAgentProfileOpen(false)}
+        agentName={selectedAgentName}
+        domainHint={domainHint}
+        source={selectedAgentSource}
+        compositeScore={compositeScore}
+        savingsPercent={savingsPercent}
+      />
     </section>
   );
 }

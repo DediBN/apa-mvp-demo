@@ -113,7 +113,11 @@ export function IntakeTerminal() {
       selectedAgentName: winner.candidateName,
       roiValue: roi.annualValue,
       estimatedSavings: roi.monthlyValue,
-      performanceImprovement: roi.savingsPercent
+      performanceImprovement: roi.savingsPercent,
+      domainHint: `${ajd?.domain || ""} ${businessNeed || ""}`.trim(),
+      selectedAgentSource: winner.candidateSource,
+      compositeScore: winner.scorecard.compositeScore,
+      savingsPercent: roi.savingsPercent
     };
   }, [evaluationResults]);
 
@@ -337,6 +341,10 @@ export function IntakeTerminal() {
             estimatedSavings={summaryData.estimatedSavings}
             performanceImprovement={summaryData.performanceImprovement}
             useCaseSummary={businessNeed}
+            domainHint={summaryData.domainHint}
+            selectedAgentSource={summaryData.selectedAgentSource}
+            compositeScore={summaryData.compositeScore}
+            savingsPercent={summaryData.savingsPercent}
           />
         </div>
       ) : null}
