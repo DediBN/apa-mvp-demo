@@ -15,6 +15,9 @@ interface SourcingRadarProps {
   addLog: (line: string) => void;
 }
 
+const SOURCING_TIMEOUT_MS = 8000;
+const API_REPLACE_WINDOW_MS = 4000;
+
 function buildLocalFallbackCandidates(ajd: AJD): Candidate[] {
   return [
     {
@@ -62,11 +65,18 @@ export function SourcingRadar({ status, ajd, onShortlistReady, onFail, addLog }:
   const [visibleCount, setVisibleCount] = useState(0);
   const hasTransitionedRef = useRef(false);
   const hasRequestedRef = useRef(false);
+  const replaceDeadlineRef = useRef<number | null>(null);
+  const latestShortlistRef = useRef<Candidate[]>([]);
+
+  useEffect(() => {
+    latestShortlistRef.current = shortlist;
+  }, [shortlist]);
 
   useEffect(() => {
     if (status.state === "IDLE" || status.state === "INTAKE") {
       hasTransitionedRef.current = false;
       hasRequestedRef.current = false;
+      replaceDeadlineRef.current = null;
       setShortlist([]);
       setVisibleCount(0);
       setIsScanning(false);
@@ -84,33 +94,59 @@ export function SourcingRadar({ status, ajd, onShortlistReady, onFail, addLog }:
       return;
     }
 
+    const readyAjd = ajd;
     let canceled = false;
+    const fallbackCandidates = buildLocalFallbackCandidates(readyAjd);
+
     hasRequestedRef.current = true;
+    replaceDeadlineRef.current = Date.now() + API_REPLACE_WINDOW_MS;
     setIsScanning(true);
-    setShortlist(buildLocalFallbackCandidates(ajd));
     setVisibleCount(0);
+    setShortlist(fallbackCandidates);
     addLog("Sourcing Radar activated. Scanning Hugging Face, OpenAI, CrewAI.");
 
-    const jobTitle = ajd.job_title?.trim() || `${ajd.domain} Automation Agent`;
-    const mission = ajd.agent_profile?.mission?.trim() || ajd.business_need?.trim() || "Automate core workflows with safe escalation controls";
+    const jobTitle = readyAjd.job_title?.trim() || `${readyAjd.domain} Automation Agent`;
+    const mission = readyAjd.agent_profile?.mission?.trim() || readyAjd.business_need?.trim() || "Automate core workflows with safe escalation controls";
     addLog(`Radar input prepared: title='${jobTitle}', mission='${mission.slice(0, 48)}...'`);
+    const startTime = Date.now();
 
-    runSourcingScan({
-      jobTitle,
-      mission
-    })
-      .then((candidates) => {
+    Promise.race<Candidate[]>([
+      (() => {
+        console.log("CALLING API NOW", Date.now());
+        return runSourcingScan({
+          jobTitle,
+          mission,
+          kpis: readyAjd.agent_profile?.kpis ?? [],
+          integrations: readyAjd.integrations as Record<string, string> ?? {},
+          stack_hint: "neutral",
+          budget_tier: "smb"
+        });
+      })(),
+      new Promise<Candidate[]>((_, reject) => {
+        window.setTimeout(() => reject(new Error("Sourcing API timeout")), SOURCING_TIMEOUT_MS);
+      })
+    ])
+      .then((result) => {
         if (canceled) {
           return;
         }
 
-        const normalizedCandidates = Array.isArray(candidates) && candidates.length >= 3
-          ? candidates.slice(0, 5)
-          : buildLocalFallbackCandidates(ajd);
+        const resultPayload = { candidates: result };
+        console.log("API RESULT:", resultPayload?.candidates?.length, resultPayload?.candidates?.[0]?.name, Date.now());
+        console.log("API response time:", Date.now() - startTime, "ms");
+        console.log("API returned:", result?.length, result?.[0]?.name);
 
-        setVisibleCount(0);
-        setShortlist(normalizedCandidates);
-        addLog(`Shortlist generated: ${normalizedCandidates.length} candidates matched to AJD.`);
+        if (!Array.isArray(result) || result.length < 3) {
+          addLog("Sourcing API returned fewer than 3 candidates. Using local fallback shortlist.");
+          return;
+        }
+
+        if (!hasTransitionedRef.current) {
+          const normalizedCandidates = result.slice(0, 5);
+          setVisibleCount(0);
+          setShortlist(normalizedCandidates);
+          addLog(`Shortlist upgraded from API: ${normalizedCandidates.length} candidates matched to AJD.`);
+        }
       })
       .catch((error) => {
         if (canceled) {
@@ -118,8 +154,7 @@ export function SourcingRadar({ status, ajd, onShortlistReady, onFail, addLog }:
         }
 
         const reason = error instanceof Error ? error.message : "Sourcing scan failed";
-        onFail(reason);
-        addLog(`Transition accepted: * -> ERROR (${reason})`);
+        addLog(`Sourcing API error/timeout: ${reason}. Keeping local fallback shortlist.`);
       })
       .finally(() => {
         if (!canceled) {
@@ -137,6 +172,8 @@ export function SourcingRadar({ status, ajd, onShortlistReady, onFail, addLog }:
       return;
     }
 
+    let transitionTimer: number | null = null;
+
     const timer = window.setInterval(() => {
       setVisibleCount((prev) => {
         const next = prev + 1;
@@ -144,10 +181,23 @@ export function SourcingRadar({ status, ajd, onShortlistReady, onFail, addLog }:
         if (next >= shortlist.length) {
           window.clearInterval(timer);
 
-          if (!hasTransitionedRef.current) {
-            hasTransitionedRef.current = true;
-            addLog("Radar scan complete. Transition accepted: RESEARCH -> EVALUATING");
-            onShortlistReady(shortlist);
+          const finalizeTransition = () => {
+            if (!hasTransitionedRef.current) {
+              hasTransitionedRef.current = true;
+              addLog("Radar scan complete. Transition accepted: RESEARCH -> EVALUATING");
+              onShortlistReady(latestShortlistRef.current);
+            }
+          };
+
+          const deadline = replaceDeadlineRef.current;
+          const waitMs = deadline ? Math.max(0, deadline - Date.now()) : 0;
+
+          if (waitMs > 0 && isScanning) {
+            transitionTimer = window.setTimeout(() => {
+              finalizeTransition();
+            }, waitMs);
+          } else {
+            finalizeTransition();
           }
         }
 
@@ -155,8 +205,13 @@ export function SourcingRadar({ status, ajd, onShortlistReady, onFail, addLog }:
       });
     }, 320);
 
-    return () => window.clearInterval(timer);
-  }, [addLog, onShortlistReady, shortlist]);
+    return () => {
+      window.clearInterval(timer);
+      if (transitionTimer !== null) {
+        window.clearTimeout(transitionTimer);
+      }
+    };
+  }, [addLog, isScanning, onShortlistReady, shortlist]);
 
   const visibleCandidates = useMemo(() => shortlist.slice(0, visibleCount), [shortlist, visibleCount]);
 
@@ -212,7 +267,7 @@ export function SourcingRadar({ status, ajd, onShortlistReady, onFail, addLog }:
                     </span>
                   </div>
 
-                  <p className="mt-2 font-mono text-xs text-command-action">Fit Score: {candidate.fit_score_pre_eval}</p>
+                  <p className="mt-2 font-mono text-xs text-command-muted">Score available after evaluation</p>
                   <p className="mt-2 text-xs text-command-muted">{candidate.reason_codes[0]}</p>
                 </article>
               ))

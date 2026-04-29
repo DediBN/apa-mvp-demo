@@ -9,8 +9,11 @@ import { SourcingRadar } from "./sourcing-radar";
 import { EvaluationCommandCenter } from "./evaluation-command-center";
 import { FinalScorecardDashboard } from "./final-scorecard-dashboard";
 import { DetailedCandidateScorecard } from "./detailed-candidate-scorecard";
+import { ResultSummaryCard } from "./result-summary-card";
 import { Candidate } from "../../lib/research-agent/mock";
 import { CandidateEvaluationResult } from "../../lib/evaluation-agent/mock";
+import { buildDefaultAssumptions, calculateROI } from "../../lib/scorecard/roi";
+import { useUIMode } from "./ui-mode-context";
 
 const TYPEWRITER_TEXT = "intake-agent> context mapping online... awaiting business need";
 
@@ -18,7 +21,29 @@ function buildTimestamp() {
   return new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" });
 }
 
+function getModeLabel(label: string, isBusinessMode: boolean): string {
+  if (!isBusinessMode) {
+    return label;
+  }
+
+  if (label === "AJD Output JSON") {
+    return "Role Definition";
+  }
+
+  if (label === "Transition Trace") {
+    return "Decision Flow";
+  }
+
+  if (label === "EVALUATING") {
+    return "Analyzing Options";
+  }
+
+  return label;
+}
+
 export function IntakeTerminal() {
+  const { mode } = useUIMode();
+  const isBusinessMode = mode === "business";
   const [status, setStatus] = useState<APAStatus>({
     state: "IDLE",
     context: createInitialContext("intake-demo-001")
@@ -61,9 +86,36 @@ export function IntakeTerminal() {
   const stateTrail = useMemo(() => {
     return ["IDLE", "INTAKE", "RESEARCH", "EVALUATING", "COMPLETE", "SCORECARD"].map((node) => {
       const active = node === status.state;
-      return { node, active };
+      return { node, active, label: getModeLabel(node, isBusinessMode) };
     });
-  }, [status.state]);
+  }, [isBusinessMode, status.state]);
+
+  const summaryData = useMemo(() => {
+    if (evaluationResults.length === 0) {
+      return null;
+    }
+
+    const winner = [...evaluationResults].sort(
+      (a, b) => b.scorecard.compositeScore - a.scorecard.compositeScore
+    )[0];
+
+    if (!winner) {
+      return null;
+    }
+
+    const roi = calculateROI(buildDefaultAssumptions(
+      winner.scorecard.compositeScore,
+      businessNeed,
+      winner.candidateSource
+    ));
+
+    return {
+      selectedAgentName: winner.candidateName,
+      roiValue: roi.annualValue,
+      estimatedSavings: roi.monthlyValue,
+      performanceImprovement: roi.savingsPercent
+    };
+  }, [evaluationResults]);
 
   const addLog = (line: string) => {
     setLogs((prev) => [`[${buildTimestamp()}] ${line}`, ...prev].slice(0, 12));
@@ -240,7 +292,7 @@ export function IntakeTerminal() {
           <h2 className="font-mono text-sm uppercase tracking-[0.18em] text-command-muted">Step 01 · Intake Terminal</h2>
           <p className="mt-1 text-lg font-semibold text-command-text">Natural-language business need to AJD JSON</p>
         </div>
-        <StatusPill label={status.state} tone={status.state === "ERROR" ? "fail" : "action"} />
+        <StatusPill label={getModeLabel(status.state, isBusinessMode)} tone={status.state === "ERROR" ? "fail" : "action"} />
       </header>
 
       <div className="mb-4 rounded-lg border border-command-border bg-command-bg/70 p-3 font-mono text-sm text-command-action shadow-glow">
@@ -277,14 +329,27 @@ export function IntakeTerminal() {
         </div>
       </form>
 
+      {summaryData ? (
+        <div className="mt-6">
+          <ResultSummaryCard
+            selectedAgentName={summaryData.selectedAgentName}
+            roiValue={summaryData.roiValue}
+            estimatedSavings={summaryData.estimatedSavings}
+            performanceImprovement={summaryData.performanceImprovement}
+            useCaseSummary={businessNeed}
+          />
+        </div>
+      ) : null}
+
+      {!isBusinessMode ? (
       <div className="mt-5 grid gap-4 lg:grid-cols-5">
         <div className="command-card p-4 lg:col-span-2">
-          <p className="font-mono text-xs uppercase tracking-[0.18em] text-command-muted">Transition Trace</p>
+          <p className="font-mono text-xs uppercase tracking-[0.18em] text-command-muted">{getModeLabel("Transition Trace", isBusinessMode)}</p>
           <div className="mt-3 flex items-center gap-2 overflow-x-auto pb-1">
-            {stateTrail.map(({ node, active }) => (
+            {stateTrail.map(({ node, active, label }) => (
               <div key={node} className="flex items-center gap-2">
                 <span className={`rounded-md border px-2 py-1 font-mono text-xs ${active ? "border-command-action text-command-action" : "border-command-border text-command-muted"}`}>
-                  {node}
+                  {label}
                 </span>
                 {node !== "SCORECARD" ? <span className="text-command-muted">-&gt;</span> : null}
               </div>
@@ -311,12 +376,13 @@ export function IntakeTerminal() {
         </div>
 
         <div className="command-card p-4 lg:col-span-3">
-          <p className="font-mono text-xs uppercase tracking-[0.18em] text-command-muted">AJD Output JSON</p>
+          <p className="font-mono text-xs uppercase tracking-[0.18em] text-command-muted">{getModeLabel("AJD Output JSON", isBusinessMode)}</p>
           <pre className="mt-3 max-h-80 overflow-auto rounded-lg border border-command-border bg-command-bg p-3 font-mono text-xs text-command-text">
             {ajd ? JSON.stringify(ajd, null, 2) : "No AJD generated yet. Submit a business need to start intake."}
           </pre>
         </div>
       </div>
+      ) : null}
 
       {ajd && status.state === "INTAKE" ? (
         <div className="mt-5 command-card-elevated border border-command-action/40 bg-command-action/5 p-5 md:p-6 animate-fadeUp">
@@ -405,6 +471,7 @@ export function IntakeTerminal() {
       <div className="mt-5">
         <FinalScorecardDashboard
           status={status}
+          ajd={ajd}
           evaluationResults={evaluationResults}
           onDeploy={handleDeploy}
           addLog={addLog}

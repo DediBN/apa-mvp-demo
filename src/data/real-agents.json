@@ -1,0 +1,152 @@
+[
+	{
+		"id": "real_sup_001",
+		"name": "Support Concierge GPT",
+		"provider": "OpenAI",
+		"domain": "support",
+		"description": "Handles tier-1 customer email support, intent routing, and CRM handoff notes.",
+		"capabilities": ["email triage", "customer support", "ticket tagging", "crm handoff"],
+		"tags": ["support", "customer", "email", "zendesk"],
+		"fit_score_pre_eval": 89
+	},
+	{
+		"id": "real_sup_002",
+		"name": "Ticket Resolution Mesh",
+		"provider": "CrewAI",
+		"domain": "support",
+		"description": "Multi-agent support workflow with escalation-aware response drafting.",
+		"capabilities": ["ticket prioritization", "escalation routing", "response drafting"],
+		"tags": ["support", "tickets", "sla", "escalation"],
+		"fit_score_pre_eval": 84
+	},
+	{
+		"id": "real_sup_003",
+		"name": "Helpdesk Reply LM",
+		"provider": "Hugging Face",
+		"domain": "support",
+		"description": "Low-latency model for repetitive support replies and FAQ grounding.",
+		"capabilities": ["faq grounding", "reply generation", "intent classification"],
+		"tags": ["support", "helpdesk", "faq"],
+		"fit_score_pre_eval": 80
+	},
+	{
+		"id": "real_sales_001",
+		"name": "Crew SDR Orchestrator",
+		"provider": "CrewAI",
+		"domain": "sales",
+		"description": "Coordinates outbound sequences, follow-ups, and lead qualification workflows.",
+		"capabilities": ["lead qualification", "outreach sequencing", "objection handling"],
+		"tags": ["sales", "sdr", "lead", "pipeline"],
+		"fit_score_pre_eval": 90
+	},
+	{
+		"id": "real_sales_002",
+		"name": "Pipeline Navigator AI",
+		"provider": "OpenAI",
+		"domain": "sales",
+		"description": "Suggests next-best sales actions and keeps CRM stage progression clean.",
+		"capabilities": ["crm updates", "deal progression", "meeting prep"],
+		"tags": ["sales", "pipeline", "crm"],
+		"fit_score_pre_eval": 87
+	},
+	{
+		"id": "real_sales_003",
+		"name": "Lead Qualification LM",
+		"provider": "Hugging Face",
+		"domain": "sales",
+		"description": "Scores inbound leads and drafts tailored first-touch outreach.",
+		"capabilities": ["lead scoring", "outreach drafting", "persona adaptation"],
+		"tags": ["sales", "lead", "qualification"],
+		"fit_score_pre_eval": 82
+	},
+	{
+		"id": "real_ops_001",
+		"name": "Ops Workflow Optimizer",
+		"provider": "Hugging Face",
+		"domain": "operations",
+		"description": "Analyzes workflow bottlenecks and recommends process-level fixes.",
+		"capabilities": ["workflow analysis", "bottleneck detection", "process recommendations"],
+		"tags": ["operations", "workflow", "process", "optimization"],
+		"fit_score_pre_eval": 88
+	},
+	{
+		"id": "real_ops_002",
+		"name": "Resource Flow Planner",
+		"provider": "CrewAI",
+		"domain": "operations",
+		"description": "Balances task queues and resource assignments under shifting constraints.",
+		"capabilities": ["resource allocation", "queue management", "constraint handling"],
+		"tags": ["operations", "logistics", "planning"],
+		"fit_score_pre_eval": 84
+	},
+	{
+		"id": "real_ops_003",
+		"name": "Process Copilot GPT",
+		"provider": "OpenAI",
+		"domain": "operations",
+		"description": "Generates SOP-aligned process automations and execution checklists.",
+		"capabilities": ["process automation", "sop generation", "handoff summaries"],
+		"tags": ["operations", "process", "workflow"],
+		"fit_score_pre_eval": 83
+	},
+	{
+		"id": "real_fin_001",
+		"name": "Invoice Guard",
+		"provider": "Hugging Face",
+		"domain": "finance",
+		"description": "Validates invoice fields, detects anomalies, and routes exceptions.",
+		"capabilities": ["invoice validation", "exception handling", "reconciliation support"],
+		"tags": ["finance", "invoice", "billing", "ap"],
+		"fit_score_pre_eval": 86
+	},
+	{
+		"id": "real_fin_002",
+		"name": "Ledger Copilot Pro",
+		"provider": "OpenAI",
+		"domain": "finance",
+		"description": "Assists reconciliation workflows and generates audit-ready summaries.",
+		"capabilities": ["ledger reconciliation", "audit summaries", "compliance checks"],
+		"tags": ["finance", "ledger", "audit"],
+		"fit_score_pre_eval": 88
+	},
+	{
+		"id": "real_fin_003",
+		"name": "Billing Resolution Crew",
+		"provider": "CrewAI",
+		"domain": "finance",
+		"description": "Orchestrates billing dispute triage with policy-aware escalation.",
+		"capabilities": ["billing triage", "policy lookup", "escalation routing"],
+		"tags": ["finance", "billing", "disputes"],
+		"fit_score_pre_eval": 81
+	},
+	{
+		"id": "real_gen_001",
+		"name": "General Ops Assistant",
+		"provider": "OpenAI",
+		"domain": "general",
+		"description": "General-purpose business operations copilot for multi-step tasks.",
+		"capabilities": ["task planning", "knowledge retrieval", "execution summaries"],
+		"tags": ["general", "operations", "assistant"],
+		"fit_score_pre_eval": 85
+	},
+	{
+		"id": "real_gen_002",
+		"name": "Universal Workflow LM",
+		"provider": "Hugging Face",
+		"domain": "general",
+		"description": "Flexible model for structured workflows and repeated internal tasks.",
+		"capabilities": ["workflow templating", "structured outputs", "classification"],
+		"tags": ["general", "workflow", "automation"],
+		"fit_score_pre_eval": 80
+	},
+	{
+		"id": "real_gen_003",
+		"name": "Automation Mesh Core",
+		"provider": "CrewAI",
+		"domain": "general",
+		"description": "Composable multi-agent system for cross-functional automation.",
+		"capabilities": ["multi-agent orchestration", "task delegation", "runbook execution"],
+		"tags": ["general", "automation", "orchestration"],
+		"fit_score_pre_eval": 82
+	}
+]

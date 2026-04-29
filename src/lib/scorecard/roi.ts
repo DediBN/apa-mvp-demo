@@ -18,15 +18,59 @@ export interface ROIResult {
   formulaDisplay: string;
 }
 
-export function buildDefaultAssumptions(compositeScore: number): ROIAssumptions {
+export function buildDefaultAssumptions(
+  compositeScore: number,
+  userInputText = "",
+  selectedAgent = ""
+): ROIAssumptions {
   const ef = Math.max(0.5, compositeScore / 100);
   const agentCost = Math.max(2.5, 6.5 - (Math.max(60, compositeScore) - 60) / 13);
 
+  // Domain detection from user input text
+  const text = userInputText.toLowerCase();
+  type Domain = "support" | "sales" | "operations" | "general";
+  let domain: Domain = "general";
+  if (text.includes("support") || text.includes("customer") || text.includes("email")) {
+    domain = "support";
+  } else if (text.includes("sales") || text.includes("lead") || text.includes("pipeline")) {
+    domain = "sales";
+  } else if (text.includes("operations") || text.includes("process") || text.includes("workflow")) {
+    domain = "operations";
+  }
+
+  const domainHours: Record<Domain, number> = {
+    support: 800,
+    sales: 500,
+    operations: 400,
+    general: 300
+  };
+  const domainRate: Record<Domain, number> = {
+    support: 35,
+    sales: 60,
+    operations: 50,
+    general: 40
+  };
+
+  // Complexity multiplier from input length
+  const len = userInputText.trim().length;
+  const complexityMultiplier = len >= 150 ? 1.2 : len >= 50 ? 1.0 : 0.8;
+
+  // Agent cost by provider
+  const agent = selectedAgent.toLowerCase();
+  let apiCostMonthly = 800;
+  if (agent.includes("openai")) {
+    apiCostMonthly = 1200;
+  } else if (agent.includes("crewai") || agent.includes("crew")) {
+    apiCostMonthly = 400;
+  } else if (agent.includes("hugging")) {
+    apiCostMonthly = 700;
+  }
+
   return {
-    monthlyHoursSaved: 600,
-    costPerHour: 45,
+    monthlyHoursSaved: Math.round(domainHours[domain] * complexityMultiplier),
+    costPerHour: domainRate[domain],
     efficiencyFactor: ef,
-    apiCostMonthly: 800,
+    apiCostMonthly,
     infraCostMonthly: 400,
     govCostMonthly: 200,
     humanCostPerResolution: 28,

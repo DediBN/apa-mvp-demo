@@ -1,3 +1,5 @@
+import { readFileSync } from "fs";
+import { join } from "path";
 import { NextResponse } from "next/server";
 import { createAnthropicClient } from "../../../../lib/anthropic-client";
 import { AJD } from "../../../../lib/intake-agent/mock";
@@ -11,9 +13,29 @@ interface EvaluationRequest {
 interface ClaudeEvalItem {
   candidate_id?: string;
   candidate_name?: string;
-  analysis?: string;
-  fit_score?: number;
-  test_results?: ClaudeEvalTestResult[];
+  composite_score?: number;
+  p1_turing?: number;
+  p1_pass?: boolean;
+  p2_objection?: number;
+  p2_pass?: boolean;
+  p3_hallucination?: number;
+  p3_pass?: boolean;
+  p4_integration?: number;
+  p4_pass?: boolean;
+  p5_deliverability?: number | "N/A";
+  p5_pass?: boolean | "N/A";
+  p6_security?: number;
+  p6_pass?: boolean;
+  p7_integration_fit?: number;
+  p7_pass?: boolean;
+  p8_domain_expertise?: number;
+  p8_pass?: boolean;
+  disqualified?: boolean;
+  disqualification_reason?: string;
+  generated_test_suite?: string;
+  test_summary?: string;
+  top_strength?: string;
+  top_weakness?: string;
 }
 
 interface ClaudeEvalResponse {
@@ -31,6 +53,36 @@ interface NormalizedTestResult {
   status: "Pass" | "Fail";
   observation: string;
 }
+
+type EvalRole = "sales" | "operations" | "support" | "finance" | "general";
+
+const ROLE_SCENARIOS: Record<EvalRole, string[]> = {
+  sales: [
+    "Write an outreach message tailored to a cold lead in the current pipeline stage",
+    "Qualify a lead with incomplete data and decide next best action",
+    "Respond to a pricing objection while protecting margin policy"
+  ],
+  operations: [
+    "Optimize a workflow with throughput and SLA constraints",
+    "Reallocate resources when a process step becomes capacity-limited",
+    "Resolve a bottleneck and propose a measurable recovery plan"
+  ],
+  support: [
+    "Answer a customer issue with policy-safe troubleshooting steps",
+    "Prioritize incoming tickets by urgency, impact, and resolution path",
+    "Escalate a complex problem with complete context for handoff"
+  ],
+  finance: [
+    "Validate invoice details and detect mismatch before approval",
+    "Handle billing exception workflows with audit-safe reasoning",
+    "Reconcile transaction anomalies and route for compliant review"
+  ],
+  general: [
+    "Interpret a business request and generate an actionable execution plan",
+    "Handle conflicting instructions while maintaining guardrails",
+    "Complete a multi-step task with reliable, traceable outputs"
+  ]
+};
 
 function extractJson(text: string): ClaudeEvalResponse {
   const direct = text.trim();
@@ -55,6 +107,46 @@ function clampScore(value: number): number {
 
 function clampToughRange(value: number): number {
   return Math.max(40, Math.min(95, Math.round(value)));
+}
+
+function detectRoleFromBusinessNeed(businessNeed: string): EvalRole {
+  const text = businessNeed.toLowerCase();
+
+  if (
+    text.includes("sales") ||
+    text.includes("sdr") ||
+    text.includes("lead") ||
+    text.includes("pipeline")
+  ) {
+    return "sales";
+  }
+
+  if (
+    text.includes("logistics") ||
+    text.includes("operations") ||
+    text.includes("workflow") ||
+    text.includes("process")
+  ) {
+    return "operations";
+  }
+
+  if (
+    text.includes("support") ||
+    text.includes("customer") ||
+    text.includes("email")
+  ) {
+    return "support";
+  }
+
+  if (
+    text.includes("finance") ||
+    text.includes("invoice") ||
+    text.includes("billing")
+  ) {
+    return "finance";
+  }
+
+  return "general";
 }
 
 function hashToUnit(seed: string): number {
@@ -84,70 +176,76 @@ function ensureReasonCodeInObservation(candidate: Candidate, observation: string
   return `Reason code reference: ${reasonCodes[0]}. ${observation}`;
 }
 
-function deriveDefaultTests(candidate: Candidate, fitScore: number): NormalizedTestResult[] {
-  const missionStatus: "Pass" | "Fail" = fitScore >= 72 ? "Pass" : "Fail";
-  const kpiStatus: "Pass" | "Fail" = fitScore >= 78 ? "Pass" : "Fail";
-  const safetyStatus: "Pass" | "Fail" = fitScore >= 75 ? "Pass" : "Fail";
-
-  return [
-    {
-      test_name: "Mission Alignment",
-      status: missionStatus,
-      observation:
-        missionStatus === "Pass"
-          ? `${candidate.name} demonstrates clear role-fit against the AJD mission.`
-          : `${candidate.name} only partially aligns with mission-critical responsibilities.`
-    },
-    {
-      test_name: "KPI Readiness",
-      status: kpiStatus,
-      observation:
-        kpiStatus === "Pass"
-          ? `${candidate.name} is likely to hit latency and quality KPI thresholds.`
-          : `${candidate.name} shows risk in consistently meeting AJD KPI thresholds.`
-    },
-    {
-      test_name: "Risk & Guardrails",
-      status: safetyStatus,
-      observation:
-        safetyStatus === "Pass"
-          ? `${candidate.name} has manageable risk under standard governance controls.`
-          : `${candidate.name} needs additional controls before production deployment.`
-    }
-  ];
+function roleScenarioTemplates(role: EvalRole): string[] {
+  return ROLE_SCENARIOS[role] || ROLE_SCENARIOS.general;
 }
 
-function normalizeTestResults(
+function roleScenarioBonus(candidate: Candidate, role: EvalRole): number {
+  const signature = `${candidate.name} ${(candidate.reason_codes || []).join(" ")}`.toLowerCase();
+
+  if (role === "sales") {
+    return signature.includes("sales") || signature.includes("lead") || signature.includes("pipeline") || signature.includes("sdr")
+      ? 4
+      : -2;
+  }
+
+  if (role === "operations") {
+    return signature.includes("operations") || signature.includes("workflow") || signature.includes("process") || signature.includes("orchestr")
+      ? 4
+      : -2;
+  }
+
+  if (role === "support") {
+    return signature.includes("support") || signature.includes("customer") || signature.includes("ticket") || signature.includes("email")
+      ? 4
+      : -2;
+  }
+
+  if (role === "finance") {
+    return signature.includes("finance") || signature.includes("invoice") || signature.includes("billing") || signature.includes("ledger") || signature.includes("audit")
+      ? 4
+      : -2;
+  }
+
+  return 0;
+}
+
+function buildRoleScenarioTests(
+  role: EvalRole,
   candidate: Candidate,
   fitScore: number,
-  raw: ClaudeEvalTestResult[] | undefined
+  item?: ClaudeEvalItem
 ): NormalizedTestResult[] {
-  if (!Array.isArray(raw) || raw.length === 0) {
-    return deriveDefaultTests(candidate, fitScore);
-  }
+  const scenarios = roleScenarioTemplates(role);
+  const scoreInputs = [
+    clampScore(item?.p2_objection ?? fitScore),
+    clampScore(item?.p4_integration ?? fitScore - 1),
+    clampScore(item?.p8_domain_expertise ?? fitScore - 2)
+  ];
 
-  const cleaned: NormalizedTestResult[] = raw
-    .map((test, index): NormalizedTestResult => {
-      const name = (test.test_name || `Test ${index + 1}`).trim();
-      const observation = (test.observation || "Observation unavailable.").trim();
-      const status: "Pass" | "Fail" = test.status === "Fail" ? "Fail" : "Pass";
+  return scenarios.map((scenario, index) => {
+    const score = scoreInputs[index] ?? clampScore(fitScore);
+    const status: "Pass" | "Fail" = score >= 75 ? "Pass" : "Fail";
 
-      return {
-        test_name: name,
-        status,
-        observation: ensureReasonCodeInObservation(candidate, observation)
-      };
-    })
-    .filter((test) => test.test_name.length > 0 && test.observation.length > 0);
-
-  if (cleaned.length === 0) {
-    return deriveDefaultTests(candidate, fitScore);
-  }
-
-  return cleaned;
+    return {
+      test_name: scenario,
+      status,
+      observation: ensureReasonCodeInObservation(
+        candidate,
+        status === "Pass"
+          ? `${candidate.name} handled this role scenario with strong reasoning quality and reliable execution control (score ${score}/100).`
+          : `${candidate.name} showed gaps in this role scenario and needs stronger policy handling and execution consistency (score ${score}/100).`
+      )
+    };
+  });
 }
 
-function normalizeEvaluations(candidates: Candidate[], raw: ClaudeEvalItem[] | undefined, runSeed: number) {
+function normalizeEvaluations(
+  candidates: Candidate[],
+  raw: ClaudeEvalItem[] | undefined,
+  runSeed: number,
+  role: EvalRole
+) {
   const byId = new Map<string, ClaudeEvalItem>();
 
   if (Array.isArray(raw)) {
@@ -160,13 +258,9 @@ function normalizeEvaluations(candidates: Candidate[], raw: ClaudeEvalItem[] | u
 
   const provisional = candidates.map((candidate) => {
     const item = byId.get(candidate.candidate_id);
-    const fitScore = clampToughRange(item?.fit_score ?? (candidate.fit_score_pre_eval ?? 75));
-
-    return {
-      candidate,
-      item,
-      fitScore
-    };
+    const baseScore = clampToughRange(item?.composite_score ?? (candidate.fit_score_pre_eval ?? 75));
+    const fitScore = clampToughRange(baseScore + roleScenarioBonus(candidate, role));
+    return { candidate, item, fitScore };
   });
 
   const ranked = [...provisional].sort((a, b) => b.fitScore - a.fitScore);
@@ -177,23 +271,25 @@ function normalizeEvaluations(candidates: Candidate[], raw: ClaudeEvalItem[] | u
     const position = n > 1 ? index / (n - 1) : 0.5;
     const baseScore = 95 - position * 55;
     const jitter = (hashToUnit(`${runSeed}:${entry.candidate.candidate_id}:spread`) - 0.5) * 6;
-    const spreadScore = clampToughRange(baseScore + jitter);
-    spreadById.set(entry.candidate.candidate_id, spreadScore);
+    spreadById.set(entry.candidate.candidate_id, clampToughRange(baseScore + jitter));
   });
 
   return candidates.map((candidate) => {
     const item = byId.get(candidate.candidate_id);
-    const fitScore = spreadById.get(candidate.candidate_id) ?? clampToughRange(candidate.fit_score_pre_eval ?? 75);
+    const spreadScore = spreadById.get(candidate.candidate_id) ?? clampToughRange(candidate.fit_score_pre_eval ?? 75);
+    const fitScore = clampToughRange(spreadScore + roleScenarioBonus(candidate, role));
+    const testResults = buildRoleScenarioTests(role, candidate, fitScore, item);
 
     return {
       candidate_id: candidate.candidate_id,
       candidate_name: candidate.name,
       fit_score: fitScore,
       analysis:
-        item?.analysis?.trim() ||
+        item?.test_summary?.trim() ||
         `${candidate.name} aligns with core AJD requirements and shows strong implementation potential. ` +
           `Primary risk centers on integration hardening and governance controls under production load.`,
-      test_results: normalizeTestResults(candidate, fitScore, item?.test_results)
+      generated_test_suite: item?.generated_test_suite?.trim() ?? null,
+      test_results: testResults
     };
   });
 }
@@ -302,19 +398,23 @@ function buildExpertTests(candidate: Candidate): NormalizedTestResult[] {
 function buildFallbackEvaluations(candidates: Candidate[]) {
   const runSeed = Math.floor(Math.random() * 1_000_000_000);
 
+  return buildFallbackEvaluationsForRole(candidates, runSeed, "general");
+}
+
+function buildFallbackEvaluationsForRole(candidates: Candidate[], runSeed: number, role: EvalRole) {
   return candidates.map((candidate, index) => {
     const n = Math.max(1, candidates.length);
     const position = n > 1 ? index / (n - 1) : 0.5;
     const baseScore = 95 - position * 55;
     const jitter = (hashToUnit(`${runSeed}:${candidate.candidate_id}:fallback`) - 0.5) * 8;
-    const fitScore = clampToughRange(baseScore + jitter);
+    const fitScore = clampToughRange(baseScore + jitter + roleScenarioBonus(candidate, role));
 
     return {
       candidate_id: candidate.candidate_id,
       candidate_name: candidate.name,
       fit_score: fitScore,
       analysis: buildExpertAnalysis(candidate),
-      test_results: buildExpertTests(candidate)
+      test_results: buildRoleScenarioTests(role, candidate, fitScore)
     };
   });
 }
@@ -327,6 +427,8 @@ export async function POST(request: Request) {
     body = (await request.json()) as EvaluationRequest;
     const ajd = body.ajd;
     const candidates = Array.isArray(body.candidates) ? body.candidates : [];
+    const role = detectRoleFromBusinessNeed(ajd?.business_need || "");
+    const roleScenarios = roleScenarioTemplates(role);
 
     if (!ajd || candidates.length === 0) {
       return NextResponse.json({ evaluations: buildFallbackEvaluations(candidates) });
@@ -349,21 +451,40 @@ export async function POST(request: Request) {
       reason_codes: (candidate.reason_codes || []).slice(0, 2)
     }));
 
+    const agentPrompt = readFileSync(
+      join(process.cwd(), ".claude/prompts/evaluation-agent.md"),
+      "utf-8"
+    );
+
     const requestPayload = {
-      max_tokens: 700,
+      max_tokens: 1600,
       temperature: 0.2,
-      system:
-        "You are a tough evaluator. Do not give safe, middle-of-the-road scores. Identify clear winners and losers. " +
-        "Use full fit_score range 40-95. Return strict JSON only.",
+      system: agentPrompt + "\nReturn strict JSON only. No markdown, no prose.",
       messages: [
         {
           role: "user" as const,
           content:
-            "Evaluate candidates against AJD mission and KPIs. " +
-            "Return JSON: {\"evaluations\":[{\"candidate_id\":\"string\",\"candidate_name\":\"string\",\"analysis\":\"string\",\"fit_score\":85,\"test_results\":[{\"test_name\":\"Mission Alignment\",\"status\":\"Pass\",\"observation\":\"short\"},{\"test_name\":\"KPI Readiness\",\"status\":\"Pass\",\"observation\":\"short\"},{\"test_name\":\"Risk & Guardrails\",\"status\":\"Fail\",\"observation\":\"short\"}]}]}. " +
-            "Each candidate must include at least 3 test_results. " +
-            "Each test observation must reference at least one specific reason_codes detail from that candidate. " +
-            "Do not return tied fit_score values across candidates. " +
+            "Evaluate these candidates against the AJD. " +
+            "First generate the test suite for P2 and P8 from the AJD, then run all 8 parameters per candidate in parallel. " +
+            "Return JSON with this exact shape: " +
+            "{\"generated_test_suite\":\"string summarising P2 scenarios and P8 questions generated\"," +
+            "\"evaluations\":[{" +
+            "\"candidate_id\":\"string\",\"candidate_name\":\"string\"," +
+            "\"composite_score\":85," +
+            "\"p1_turing\":85,\"p1_pass\":true," +
+            "\"p2_objection\":85,\"p2_pass\":true," +
+            "\"p3_hallucination\":85,\"p3_pass\":true," +
+            "\"p4_integration\":85,\"p4_pass\":true," +
+            "\"p5_deliverability\":85,\"p5_pass\":true," +
+            "\"p6_security\":100,\"p6_pass\":true," +
+            "\"p7_integration_fit\":100,\"p7_pass\":true," +
+            "\"p8_domain_expertise\":85,\"p8_pass\":true," +
+            "\"disqualified\":false,\"disqualification_reason\":\"\"," +
+            "\"generated_test_suite\":\"string\"," +
+            "\"test_summary\":\"string\",\"top_strength\":\"string\",\"top_weakness\":\"string\"}]}. " +
+            "Do not return tied composite_score values across candidates. " +
+            `Role: ${role}. ` +
+            `Role-specific scenarios to include in P2/P8 reasoning: ${JSON.stringify(roleScenarios)}. ` +
             `AJD: ${JSON.stringify(compactAjd)}. ` +
             `Candidates: ${JSON.stringify(compactCandidates)}. ` +
             `run_seed: ${runSeed}.`
@@ -401,14 +522,16 @@ export async function POST(request: Request) {
       .join("\n");
 
     const parsed = extractJson(text);
-    const evaluations = normalizeEvaluations(candidates, parsed.evaluations, runSeed);
+    const evaluations = normalizeEvaluations(candidates, parsed.evaluations, runSeed, role);
 
     return NextResponse.json({ evaluations });
   } catch (error) {
     console.log("SERVER_ERROR:", error);
 
     const candidates = Array.isArray(body.candidates) ? body.candidates : [];
-    const fallbackEvaluations = buildFallbackEvaluations(candidates);
+    const role = detectRoleFromBusinessNeed(body.ajd?.business_need || "");
+    const runSeed = Math.floor(Math.random() * 1_000_000_000);
+    const fallbackEvaluations = buildFallbackEvaluationsForRole(candidates, runSeed, role);
 
     return NextResponse.json({
       evaluations: fallbackEvaluations,
