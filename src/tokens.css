@@ -1,0 +1,37 @@
+:root {
+  /* Brand colours */
+  --ink:        #0B1220;
+  --steel:      #1B3A66;
+  --gold:       #C9962E;
+  --gold-bright:#E8B54A;
+  --red:        #B03A2E;
+  --mist:       #F4F6F9;
+  --line:       #E2E7EE;
+
+  /* Derived surfaces */
+  --surface:    #111827;
+  --surface-2:  #162032;
+  --surface-3:  #1e2d44;
+  --text:       #F4F6F9;
+  --text-dim:   #8b9bbf;
+  --text-muted: #4a5c7a;
+  --border:     rgba(226,231,238,0.12);
+
+  /* Token chip */
+  --token-bg:   rgba(255,255,255,0.07);
+  --token-border: rgba(255,255,255,0.2);
+
+  /* Typography */
+  --font-head:  'Space Grotesk', sans-serif;
+  --font-body:  'Inter', sans-serif;
+  --font-mono:  'IBM Plex Mono', monospace;
+
+  /* Spacing */
+  --top-bar-h:  56px;
+  --rail-h:     48px;
+  --chrome-h:   calc(var(--top-bar-h) + var(--rail-h));
+
+  /* Easing */
+  --ease-out:   cubic-bezier(0.22, 1, 0.36, 1);
+  --ease-in:    cubic-bezier(0.64, 0, 0.78, 0);
+}

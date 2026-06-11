@@ -1,0 +1,10 @@
+/* ── Root split layout ── */
+
+.demo-shell {
+  display: grid;
+  grid-template-columns: 42fr 58fr;
+  height: 100vh;
+  width: 100%;
+  min-width: 1280px;
+  overflow: hidden;
+}

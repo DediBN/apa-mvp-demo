@@ -1,0 +1,37 @@
+@import './tokens.css';
+
+*, *::before, *::after {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+html, body, #root {
+  height: 100%;
+  width: 100%;
+  overflow: hidden;
+  /* No background override here — each panel sets its own */
+}
+
+body {
+  font-family: var(--font-body);
+  font-size: 16px;
+  line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
+  min-width: 1280px;
+  background: var(--ink);
+}
+
+h1, h2, h3, h4, h5, h6 {
+  font-family: var(--font-head);
+}
+
+/* Scrollbars — dark style for gateway panel */
+.gateway-panel ::-webkit-scrollbar { width: 5px; }
+.gateway-panel ::-webkit-scrollbar-track { background: transparent; }
+.gateway-panel ::-webkit-scrollbar-thumb { background: var(--surface-3); border-radius: 3px; }
+
+/* Scrollbars — light style for console panel */
+.console-panel ::-webkit-scrollbar { width: 5px; }
+.console-panel ::-webkit-scrollbar-track { background: #f9fafb; }
+.console-panel ::-webkit-scrollbar-thumb { background: #d1d5db; border-radius: 3px; }

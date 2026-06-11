@@ -1,0 +1,273 @@
+/* ── Shared shell ── */
+.sm {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 4px 0 8px;
+}
+
+/* ── Header row ── */
+.sm__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.sm__header-label {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0.1em;
+  color: var(--text-muted);
+  text-transform: uppercase;
+}
+
+/* ── Vault counter ── */
+.sm__vault {
+  display: flex;
+  align-items: baseline;
+  gap: 4px;
+}
+
+.sm__vault-icon {
+  font-size: 13px;
+}
+
+.sm__vault-num {
+  font-family: var(--font-head);
+  font-size: 24px;
+  font-weight: 700;
+  color: var(--text-muted);
+  min-width: 2ch;
+  line-height: 1;
+  font-variant-numeric: tabular-nums;
+  transition: color 80ms;
+}
+
+.sm__vault-num--live {
+  color: var(--gold-bright);
+  animation: vault-tick 120ms ease-out;
+}
+
+@keyframes vault-tick {
+  0%   { transform: scale(1.2); }
+  100% { transform: scale(1); }
+}
+
+.sm__vault-total {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+/* ── Table mode ── */
+.sm__table-wrap {
+  overflow-x: auto;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+}
+
+.sm__table {
+  width: 100%;
+  border-collapse: collapse;
+  font-family: var(--font-mono);
+  font-size: 11px;
+}
+
+.sm__table thead th {
+  background: rgba(255,255,255,0.04);
+  color: var(--text-muted);
+  font-weight: 500;
+  letter-spacing: 0.06em;
+  text-align: left;
+  padding: 7px 10px;
+  border-bottom: 1px solid var(--border);
+  white-space: nowrap;
+}
+
+.sm__cell {
+  padding: 7px 10px;
+  color: var(--text-dim);
+  border-bottom: 1px solid rgba(226,231,238,0.06);
+  white-space: nowrap;
+}
+
+.sm__table tr:last-child .sm__cell {
+  border-bottom: none;
+}
+
+/* PII cells start red from intercept stage */
+.sm__cell--normal {
+  color: var(--red);
+}
+
+/* Flip-out: scaleY 1→0 (cell collapses) */
+.sm__cell--flip-out {
+  color: var(--red);
+}
+
+.sm__cell--flip-out span {
+  display: inline-block;
+  animation: flip-out 90ms ease-in forwards;
+  transform-origin: center;
+}
+
+/* Token cell */
+.sm__cell--token {
+  color: var(--text-muted);
+}
+
+@keyframes flip-out {
+  0%   { transform: scaleY(1); opacity: 1; }
+  100% { transform: scaleY(0); opacity: 0; }
+}
+
+/* ── Token chip ── */
+.token-chip {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  padding: 2px 6px;
+  background: rgba(139, 155, 191, 0.1);
+  border: 1px solid rgba(139, 155, 191, 0.25);
+  border-radius: 3px;
+  color: #8b9bbf;
+  white-space: nowrap;
+  letter-spacing: 0.02em;
+}
+
+/* Token appears with a flip-in when first rendered */
+.token-chip--enter {
+  display: inline-block;
+  animation: flip-in 90ms ease-out both;
+  transform-origin: center;
+}
+
+@keyframes flip-in {
+  0%   { transform: scaleY(0); opacity: 0; }
+  100% { transform: scaleY(1); opacity: 1; }
+}
+
+/* ── End-state banner ── */
+.sm__end-state {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 12px 14px;
+  border-radius: 6px;
+  background: rgba(16, 185, 129, 0.08);
+  border: 1px solid rgba(16, 185, 129, 0.3);
+  animation: banner-enter 350ms var(--ease-out) both;
+  font-size: 12px;
+  font-family: var(--font-mono);
+  color: #6ee7b7;
+}
+
+.sm__end-icon {
+  color: #10b981;
+  font-size: 14px;
+  font-weight: 700;
+  flex-shrink: 0;
+}
+
+.sm__end-text {
+  line-height: 1.6;
+}
+
+.sm__end-text strong {
+  color: #a7f3d0;
+}
+
+.sm__end-zero {
+  display: block;
+  margin-top: 4px;
+  font-size: 13px;
+  font-family: var(--font-head);
+  font-weight: 700;
+  color: #6ee7b7;
+  letter-spacing: 0.02em;
+}
+
+@keyframes banner-enter {
+  from { opacity: 0; transform: translateY(6px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+/* ── Text mode ── */
+.sm__token-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.sm__token-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  font-family: var(--font-mono);
+  font-size: 12px;
+}
+
+.sm__token-real {
+  min-width: 140px;
+  color: var(--red);
+  transition: opacity 90ms ease-in;
+}
+
+.sm__token-real--flip-out {
+  animation: flip-out 90ms ease-in forwards;
+  display: inline-block;
+}
+
+.sm__token-real--token {
+  opacity: 0;
+  pointer-events: none;
+  min-width: 0;
+  width: 0;
+  overflow: hidden;
+}
+
+.sm__token-arrow {
+  color: var(--text-muted);
+  flex-shrink: 0;
+}
+
+.sm__token-placeholder {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: rgba(139, 155, 191, 0.35);
+  border: 1px dashed rgba(139, 155, 191, 0.2);
+  padding: 2px 6px;
+  border-radius: 3px;
+}
+
+/* Stub progress bar (used by StageStub) */
+.stage-stub-body {
+  padding: 4px 0;
+}
+
+.stage-stub-body__bar {
+  height: 3px;
+  background: rgba(201,150,46,0.15);
+  border-radius: 2px;
+  overflow: hidden;
+}
+
+.stage-stub-body__fill {
+  height: 100%;
+  background: var(--gold);
+  border-radius: 2px;
+  animation: progress-indeterminate 1.2s ease-in-out infinite;
+  transform-origin: left;
+}
+
+@keyframes progress-indeterminate {
+  0%   { transform: translateX(-100%) scaleX(0.3); }
+  50%  { transform: translateX(50%)   scaleX(0.6); }
+  100% { transform: translateX(200%)  scaleX(0.3); }
+}
+
+.stage-stub-body__note {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--text-muted);
+  font-style: italic;
+}

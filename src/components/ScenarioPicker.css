@@ -1,0 +1,116 @@
+.scenario-picker {
+  padding: 24px;
+  border-bottom: 1px solid var(--line);
+}
+
+.scenario-picker--compact {
+  padding: 12px 24px;
+}
+
+.scenario-picker__label {
+  font-size: 12px;
+  color: #6b7280;
+  margin-bottom: 12px;
+  font-family: var(--font-mono);
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.scenario-picker__cards {
+  display: flex;
+  gap: 10px;
+}
+
+/* ── Card ── */
+
+.scenario-card {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  flex: 1;
+  padding: 14px 10px;
+  background: #f9fafb;
+  border: 1.5px solid #e5e7eb;
+  border-radius: 10px;
+  cursor: pointer;
+  transition: border-color 180ms, background 180ms, box-shadow 180ms;
+  text-align: center;
+}
+
+.scenario-picker--compact .scenario-card {
+  flex-direction: row;
+  align-items: center;
+  justify-content: center;
+  padding: 8px 10px;
+  gap: 8px;
+}
+
+.scenario-card:hover {
+  border-color: var(--gold);
+  background: #fffdf7;
+  box-shadow: 0 0 0 3px rgba(201,150,46,0.08);
+}
+
+.scenario-card--active {
+  border-color: var(--gold);
+  background: #fffbf0;
+  box-shadow: 0 0 0 3px rgba(201,150,46,0.12);
+}
+
+.scenario-card__icon {
+  font-size: 20px;
+  line-height: 1;
+}
+
+.scenario-picker--compact .scenario-card__icon {
+  font-size: 16px;
+}
+
+.scenario-card__label {
+  font-family: var(--font-head);
+  font-size: 13px;
+  font-weight: 600;
+  color: #111827;
+}
+
+.scenario-picker--compact .scenario-card__label {
+  font-size: 12px;
+}
+
+.scenario-card__desc {
+  font-size: 11px;
+  color: #6b7280;
+  font-family: var(--font-body);
+}
+
+/* ── Live Mode card ── */
+
+.scenario-card--live {
+  border-color: rgba(37,99,235,0.2);
+  background: #eff6ff;
+}
+
+.scenario-card--live:hover {
+  border-color: #2563eb;
+  background: #dbeafe;
+  box-shadow: 0 0 0 3px rgba(37,99,235,0.1);
+}
+
+.scenario-card--live-active {
+  border-color: #2563eb;
+  background: #dbeafe;
+  box-shadow: 0 0 0 3px rgba(37,99,235,0.12);
+}
+
+.scenario-card__live-badge {
+  font-family: var(--font-mono);
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  color: #2563eb;
+  background: #bfdbfe;
+  padding: 2px 5px;
+  border-radius: 3px;
+  margin-top: 2px;
+}
