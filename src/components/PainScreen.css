@@ -1,0 +1,193 @@
+.pain-screen {
+  min-height: 100vh;
+  background: #080d14;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 48px 24px 64px;
+  font-family: 'IBM Plex Mono', monospace;
+  box-sizing: border-box;
+}
+
+/* Header */
+.pain-header {
+  text-align: center;
+  margin-bottom: 48px;
+}
+
+.pain-logo {
+  font-size: 36px;
+  font-weight: 800;
+  color: #e8eaf0;
+  letter-spacing: -0.03em;
+}
+
+.pain-logo span {
+  color: #64ffda;
+}
+
+.pain-tagline {
+  font-size: 11px;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: #4a6070;
+  margin: 6px 0 0;
+}
+
+/* Feed */
+.pain-body {
+  width: 100%;
+  max-width: 780px;
+}
+
+.pain-feed-label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 10px;
+  letter-spacing: 0.16em;
+  color: #e05252;
+  margin-bottom: 16px;
+  text-transform: uppercase;
+}
+
+.pain-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: #e05252;
+  animation: blink 1.2s infinite;
+}
+
+@keyframes blink {
+  0%, 100% { opacity: 1; }
+  50%       { opacity: 0.3; }
+}
+
+.pain-feed {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-bottom: 40px;
+}
+
+.pain-headline {
+  display: grid;
+  grid-template-columns: 90px 1fr 80px;
+  align-items: start;
+  gap: 12px;
+  background: #0d1720;
+  border: 1px solid #1a2a38;
+  border-left: 3px solid #e05252;
+  border-radius: 6px;
+  padding: 10px 14px;
+  opacity: 0;
+  transform: translateX(-16px);
+  transition: opacity 0.35s ease, transform 0.35s ease;
+}
+
+.pain-headline--visible {
+  opacity: 1;
+  transform: translateX(0);
+}
+
+.pain-source {
+  font-size: 10px;
+  font-weight: 600;
+  color: #64ffda;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  padding-top: 1px;
+}
+
+.pain-text {
+  font-size: 12px;
+  color: #c8d4dc;
+  line-height: 1.5;
+  font-family: 'IBM Plex Sans', sans-serif;
+}
+
+.pain-date {
+  font-size: 10px;
+  color: #4a6070;
+  text-align: right;
+  padding-top: 1px;
+  white-space: nowrap;
+}
+
+/* Stats */
+.pain-stats {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 16px;
+  margin-bottom: 40px;
+  opacity: 0;
+  transform: translateY(12px);
+  transition: opacity 0.5s ease, transform 0.5s ease;
+}
+
+.pain-stats--visible {
+  opacity: 1;
+  transform: translateY(0);
+}
+
+.pain-stat {
+  background: #0d1720;
+  border: 1px solid #1a2a38;
+  border-radius: 8px;
+  padding: 16px;
+  text-align: center;
+}
+
+.pain-stat-value {
+  font-size: 26px;
+  font-weight: 700;
+  color: #64ffda;
+  margin-bottom: 6px;
+}
+
+.pain-stat-label {
+  font-size: 11px;
+  color: #6a8090;
+  font-family: 'IBM Plex Sans', sans-serif;
+  line-height: 1.4;
+}
+
+/* CTA */
+.pain-cta {
+  text-align: center;
+  opacity: 0;
+  transform: translateY(12px);
+  transition: opacity 0.5s ease, transform 0.5s ease;
+}
+
+.pain-cta--visible {
+  opacity: 1;
+  transform: translateY(0);
+}
+
+.pain-cta-text {
+  font-size: 18px;
+  color: #e8eaf0;
+  margin-bottom: 20px;
+  font-family: 'IBM Plex Sans', sans-serif;
+  font-weight: 500;
+}
+
+.pain-cta-btn {
+  background: #64ffda;
+  color: #080d14;
+  border: none;
+  border-radius: 8px;
+  padding: 14px 36px;
+  font-size: 14px;
+  font-weight: 700;
+  font-family: 'IBM Plex Mono', monospace;
+  letter-spacing: 0.06em;
+  cursor: pointer;
+  transition: brightness 0.15s;
+}
+
+.pain-cta-btn:hover {
+  filter: brightness(1.1);
+}
