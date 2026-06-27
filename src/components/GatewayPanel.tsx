@@ -6,6 +6,7 @@ import StageMask      from '../stages/StageMask';
 import StageStub      from '../stages/StageStub';
 import type { StageProps } from '../stages/types';
 import './GatewayPanel.css';
+import '../stages/StageDecompose.css';
 
 // ── Event log types ───────────────────────────────────────────────────────────
 
@@ -35,6 +36,190 @@ function trunc(s: string, n: number): string {
   return s.length > n ? s.slice(0, n) + '…' : s;
 }
 
+// ── StageDecompose ────────────────────────────────────────────────────────────
+function StageDecompose({ active, done, scenario, onComplete }: StageProps) {
+  const [visibleCount, setVisibleCount] = useState(0);
+  const [expandedTask, setExpandedTask] = useState<number | null>(null);
+  const completedRef = useRef(false);
+  const cbRef = useRef(onComplete);
+  cbRef.current = onComplete;
+
+  const tasks = scenario?.tasks ?? [];
+
+  useEffect(() => {
+    if (!active && !done) { setVisibleCount(0); setExpandedTask(null); completedRef.current = false; }
+  }, [active, done]);
+
+  useEffect(() => {
+    if (!active || done) return;
+    completedRef.current = false;
+    const timers: ReturnType<typeof setTimeout>[] = [];
+    tasks.forEach((_, i) => {
+      timers.push(setTimeout(() => setVisibleCount(i + 1), 300 + i * 420));
+    });
+    const total = 300 + (tasks.length - 1) * 420 + 800;
+    timers.push(setTimeout(() => {
+      if (!completedRef.current) { completedRef.current = true; cbRef.current(); }
+    }, total));
+    return () => timers.forEach(clearTimeout);
+  }, [active, done]);
+
+  if (!active && !done) return null;
+
+  return (
+    <div className="sd-decompose">
+      {tasks.slice(0, visibleCount).map((t, i) => (
+        <div
+          key={t.id}
+          className={`sd-task${expandedTask === i ? ' sd-task--expanded' : ''}`}
+          onClick={() => setExpandedTask(expandedTask === i ? null : i)}
+        >
+          <div className="sd-task__row">
+            <span className="sd-task__id">T{t.id}</span>
+            <span className="sd-task__label">{t.label}</span>
+            <span className={`sd-task__dest sd-task__dest--${t.destination}`}>
+              {t.destination === 'local' ? '🖥 LOCAL' : '☁ CLOUD'}
+            </span>
+            <span className="sd-task__model">{t.model}</span>
+            <span className="sd-task__chevron">{expandedTask === i ? '▲' : '▼'}</span>
+          </div>
+          {expandedTask === i && (
+            <div className="sd-task__detail">
+              <strong>Why {t.model}?</strong>{' '}
+              {t.destination === 'local'
+                ? `Runs entirely on-premises — no data egress. Qwen 2.5 and Llama 3.2 handle structured reasoning locally.`
+                : `Requires frontier reasoning. Prompt is masked before dispatch — ${t.model} never sees real identifiers.`}
+            </div>
+          )}
+        </div>
+      ))}
+    </div>
+  );
+}
+
+// ── StageRoute ────────────────────────────────────────────────────────────────
+function StageRoute({ active, done, scenario, onComplete }: StageProps) {
+  const [visibleCount, setVisibleCount] = useState(0);
+  const completedRef = useRef(false);
+  const cbRef = useRef(onComplete);
+  cbRef.current = onComplete;
+  const tasks = scenario?.tasks ?? [];
+
+  useEffect(() => {
+    if (!active && !done) { setVisibleCount(0); completedRef.current = false; }
+  }, [active, done]);
+
+  useEffect(() => {
+    if (!active || done) return;
+    completedRef.current = false;
+    const timers: ReturnType<typeof setTimeout>[] = [];
+    tasks.forEach((_, i) => {
+      timers.push(setTimeout(() => setVisibleCount(i + 1), 200 + i * 300));
+    });
+    const total = 200 + (tasks.length - 1) * 300 + 700;
+    timers.push(setTimeout(() => {
+      if (!completedRef.current) { completedRef.current = true; cbRef.current(); }
+    }, total));
+    return () => timers.forEach(clearTimeout);
+  }, [active, done]);
+
+  if (!active && !done) return null;
+
+  return (
+    <div className="sd-route">
+      {tasks.slice(0, visibleCount).map(t => (
+        <div key={t.id} className="sd-route__row">
+          <span className="sd-route__task">Task {t.id}</span>
+          <span className="sd-route__arrow">→</span>
+          <span className={`sd-route__dest sd-route__dest--${t.destination}`}>
+            {t.destination === 'local' ? '🖥' : '☁'}
+          </span>
+          <span className="sd-route__model">{t.model}</span>
+          {t.destination === 'cloud' && (
+            <span className="sd-route__masked">MASKED</span>
+          )}
+        </div>
+      ))}
+    </div>
+  );
+}
+
+// ── StageExecute ──────────────────────────────────────────────────────────────
+function StageExecute({ active, done, scenario, onComplete }: StageProps) {
+  const [progress, setProgress] = useState<Record<number, number>>({});
+  const [completed, setCompleted] = useState<Set<number>>(new Set());
+  const completedRef = useRef(false);
+  const cbRef = useRef(onComplete);
+  cbRef.current = onComplete;
+  const tasks = scenario?.tasks ?? [];
+
+  useEffect(() => {
+    if (!active && !done) { setProgress({}); setCompleted(new Set()); completedRef.current = false; }
+  }, [active, done]);
+
+  useEffect(() => {
+    if (!active || done) return;
+    completedRef.current = false;
+    const timers: ReturnType<typeof setTimeout>[] = [];
+    const intervals: ReturnType<typeof setInterval>[] = [];
+
+    tasks.forEach(t => {
+      const STEPS = 20;
+      const stepMs = t.executionMs / STEPS;
+      let step = 0;
+      const iv = setInterval(() => {
+        step++;
+        const pct = Math.min(100, Math.round((step / STEPS) * 100));
+        setProgress(prev => ({ ...prev, [t.id]: pct }));
+        if (step >= STEPS) {
+          clearInterval(iv);
+          setCompleted(prev => new Set([...prev, t.id]));
+        }
+      }, stepMs);
+      intervals.push(iv);
+    });
+
+    const maxMs = Math.max(...tasks.map(t => t.executionMs));
+    timers.push(setTimeout(() => {
+      if (!completedRef.current) { completedRef.current = true; cbRef.current(); }
+    }, maxMs + 600));
+
+    return () => { timers.forEach(clearTimeout); intervals.forEach(clearInterval); };
+  }, [active, done]);
+
+  if (!active && !done) return null;
+
+  return (
+    <div className="sd-execute">
+      {tasks.map(t => {
+        const pct = progress[t.id] ?? 0;
+        const isDone = completed.has(t.id);
+        return (
+          <div key={t.id} className="sd-exec__row">
+            <div className="sd-exec__meta">
+              <span className={`sd-exec__dest sd-exec__dest--${t.destination}`}>
+                {t.destination === 'local' ? '🖥' : '☁'}
+              </span>
+              <span className="sd-exec__label">{t.label}</span>
+              <span className="sd-exec__model">{t.model}</span>
+              {isDone && <span className="sd-exec__done">✓</span>}
+            </div>
+            <div className="sd-exec__bar-wrap">
+              <div
+                className={`sd-exec__bar${isDone ? ' sd-exec__bar--done' : ''}`}
+                style={{ width: `${pct}%` }}
+              />
+            </div>
+            {t.destination === 'cloud' && (
+              <div className="sd-exec__masked-note">prompt masked · no PII in transit</div>
+            )}
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
 // ── Stage registry ────────────────────────────────────────────────────────────
 
 interface StageConfig {
@@ -54,29 +239,12 @@ const GATEWAY_STAGES: StageConfig[] = [
   {
     id: 'DECOMPOSE', label: 'Decompose', icon: '🧩',
     desc: 'Local orchestrator · task decomposition',
-    render: p => {
-      const tasks  = p.scenario?.tasks ?? [];
-      const local  = tasks.filter(t => t.destination === 'local').length;
-      const cloud  = tasks.filter(t => t.destination === 'cloud').length;
-      const note   = tasks.length > 0
-        ? `${tasks.length} tasks identified · ${local} local, ${cloud} cloud`
-        : '5 tasks identified · 3 local, 2 cloud';
-      return <StageStub {...p} durationMs={2500} doneNote={note} />;
-    },
+    render: p => <StageDecompose {...p} />,
   },
   {
     id: 'ROUTE', label: 'Route', icon: '🔀',
     desc: 'Model assignment · local vs cloud',
-    render: p => {
-      const tasks = p.scenario?.tasks ?? [];
-      let note = 'Llama 3.2, Qwen 2.5 local · Claude, GPT-4o cloud (masked)';
-      if (tasks.length > 0) {
-        const lm = [...new Set(tasks.filter(t => t.destination === 'local').map(t => t.model))].join(', ');
-        const cm = [...new Set(tasks.filter(t => t.destination === 'cloud').map(t => t.model))].join(', ');
-        note = `${lm || '—'} local · ${cm || '—'} cloud (masked)`;
-      }
-      return <StageStub {...p} durationMs={2000} doneNote={note} />;
-    },
+    render: p => <StageRoute {...p} />,
   },
   {
     id: 'MASK', label: 'Mask', icon: '🔒',
@@ -85,16 +253,8 @@ const GATEWAY_STAGES: StageConfig[] = [
   },
   {
     id: 'EXECUTE', label: 'Execute', icon: '⚡',
-    desc: 'Parallel task execution · 3 local + 2 cloud',
-    render: p => {
-      const tasks  = p.scenario?.tasks ?? [];
-      const local  = tasks.filter(t => t.destination === 'local').length;
-      const cloud  = tasks.filter(t => t.destination === 'cloud').length;
-      const note   = tasks.length > 0
-        ? `All ${tasks.length} tasks complete · ${local} local, ${cloud} cloud`
-        : 'All 5 tasks complete · local avg 900ms · cloud avg 4s';
-      return <StageStub {...p} durationMs={3500} doneNote={note} />;
-    },
+    desc: 'Parallel task execution · local + cloud (masked)',
+    render: p => <StageExecute {...p} />,
   },
   {
     id: 'ASSEMBLE', label: 'Assemble', icon: '📄',
