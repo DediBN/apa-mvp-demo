@@ -253,7 +253,7 @@ export default function ConsolePanel({
           <>
             <div className="console-live-upload-row">
               <FileUploader
-                onTextExtracted={(text, filename) => {
+                onTextExtracted={(text, _filename) => {
                   onLivePromptChange(text);
                 }}
                 disabled={phase === 'analyzing'}
