@@ -5,6 +5,7 @@ import { useTypeWriter } from './TypeWriter';
 import { TYPING_SPEED_MS } from '../timings';
 import ScenarioPicker from './ScenarioPicker';
 import './ConsolePanel.css';
+import FileUploader from './FileUploader';
 
 interface Props {
   mode: Mode;
@@ -250,11 +251,19 @@ export default function ConsolePanel({
       <div className={`console-input-area${showInput ? ' console-input-area--visible' : ''}`}>
         {mode === 'live' ? (
           <>
+            <div className="console-live-upload-row">
+              <FileUploader
+                onTextExtracted={(text, filename) => {
+                  onLivePromptChange(text);
+                }}
+                disabled={phase === 'analyzing'}
+              />
+            </div>
             <textarea
               className="console-input-field console-live-textarea"
               value={livePrompt}
               onChange={e => onLivePromptChange(e.target.value)}
-              placeholder="Describe a request involving client data — names, accounts, amounts, IDs…"
+              placeholder="Describe a request involving client data — names, accounts, amounts, IDs… or upload a file above"
               disabled={phase === 'analyzing'}
               rows={4}
               aria-label="Live prompt"

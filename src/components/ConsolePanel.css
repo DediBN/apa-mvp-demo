@@ -675,3 +675,7 @@
   background: #eff6ff;
   color: #1d4ed8;
 }
+
+.console-live-upload-row {
+  padding: 8px 12px 0;
+}
