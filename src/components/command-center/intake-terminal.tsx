@@ -10,6 +10,7 @@ import { EvaluationCommandCenter } from "./evaluation-command-center";
 import { FinalScorecardDashboard } from "./final-scorecard-dashboard";
 import { DetailedCandidateScorecard } from "./detailed-candidate-scorecard";
 import { ResultSummaryCard } from "./result-summary-card";
+import { AgentReadinessCheck } from "./agent-readiness-check";
 import { Candidate } from "../../lib/research-agent/mock";
 import { CandidateEvaluationResult } from "../../lib/evaluation-agent/mock";
 import { buildDefaultAssumptions, calculateROI } from "../../lib/scorecard/roi";
@@ -59,6 +60,7 @@ export function IntakeTerminal() {
   const [shortlist, setShortlist] = useState<Candidate[]>([]);
   const [evaluationResults, setEvaluationResults] = useState<CandidateEvaluationResult[]>([]);
   const [selectedCandidateId, setSelectedCandidateId] = useState<string | null>(null);
+  const [readinessAjd, setReadinessAjd] = useState<AJD | null>(null);
   const [logs, setLogs] = useState<string[]>([
     `[${buildTimestamp()}] System ready. State=IDLE`
   ]);
@@ -222,11 +224,7 @@ export function IntakeTerminal() {
     }
   };
 
-  const handleApproveAndStartSourcing = () => {
-    if (!ajd || !canTransition(status.state, { type: "SUBMIT_AJD" })) {
-      return;
-    }
-
+  const buildApprovedAjd = (source: AJD): AJD => {
     const kpiLines = reviewKpis
       .split("\n")
       .map((line) => line.trim())
@@ -250,18 +248,26 @@ export function IntakeTerminal() {
             target: target || "TBD"
           };
         })
-      : ajd.agent_profile?.kpis || [];
+      : source.agent_profile?.kpis || [];
 
-    const approvedAjd: AJD = {
-      ...ajd,
-      job_title: reviewJobTitle.trim() || ajd.job_title,
+    return {
+      ...source,
+      job_title: reviewJobTitle.trim() || source.job_title,
       agent_profile: {
-        role: ajd.agent_profile?.role || (reviewJobTitle.trim() || ajd.job_title),
-        mission: reviewMission.trim() || ajd.agent_profile?.mission || ajd.business_need,
+        role: source.agent_profile?.role || (reviewJobTitle.trim() || source.job_title),
+        mission: reviewMission.trim() || source.agent_profile?.mission || source.business_need,
         kpis: parsedKpis,
-        tech_specs: ajd.agent_profile?.tech_specs || []
+        tech_specs: source.agent_profile?.tech_specs || []
       }
     };
+  };
+
+  const handleApproveAndStartSourcing = () => {
+    if (!ajd || !canTransition(status.state, { type: "SUBMIT_AJD" })) {
+      return;
+    }
+
+    const approvedAjd = buildApprovedAjd(ajd);
 
     setAjd(approvedAjd);
 
@@ -274,6 +280,15 @@ export function IntakeTerminal() {
 
     addLog("Manager approved AJD edits.");
     addLog("Transition accepted: INTAKE -> RESEARCH");
+  };
+
+  const handleTestOnRealData = () => {
+    if (!ajd) {
+      return;
+    }
+
+    setReadinessAjd(buildApprovedAjd(ajd));
+    addLog("Opened readiness check on approved AJD. No state transition.");
   };
 
   const handleReset = () => {
@@ -440,7 +455,15 @@ export function IntakeTerminal() {
               />
             </div>
 
-            <div className="flex justify-end">
+            <div className="flex flex-wrap justify-end gap-3">
+              <button
+                type="button"
+                onClick={handleTestOnRealData}
+                disabled={!canApprove}
+                className="rounded-lg border border-command-border bg-transparent px-5 py-2.5 font-mono text-sm font-semibold text-command-text transition hover:border-command-action hover:text-command-action disabled:cursor-not-allowed disabled:opacity-45"
+              >
+                Test on Real Data
+              </button>
               <button
                 type="button"
                 onClick={handleApproveAndStartSourcing}
@@ -450,6 +473,10 @@ export function IntakeTerminal() {
                 Approve &amp; Start Sourcing
               </button>
             </div>
+
+            {readinessAjd ? (
+              <AgentReadinessCheck ajd={readinessAjd} onClose={() => setReadinessAjd(null)} />
+            ) : null}
           </div>
         </div>
       ) : null}
