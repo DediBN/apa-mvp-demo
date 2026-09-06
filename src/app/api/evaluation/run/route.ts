@@ -1,3 +1,5 @@
+import { readFileSync } from "fs";
+import { join } from "path";
 import { NextResponse } from "next/server";
 import { createAnthropicClient } from "../../../../lib/anthropic-client";
 import { AJD } from "../../../../lib/intake-agent/mock";
@@ -11,9 +13,29 @@ interface EvaluationRequest {
 interface ClaudeEvalItem {
   candidate_id?: string;
   candidate_name?: string;
-  analysis?: string;
-  fit_score?: number;
-  test_results?: ClaudeEvalTestResult[];
+  composite_score?: number;
+  p1_turing?: number;
+  p1_pass?: boolean;
+  p2_objection?: number;
+  p2_pass?: boolean;
+  p3_hallucination?: number;
+  p3_pass?: boolean;
+  p4_integration?: number;
+  p4_pass?: boolean;
+  p5_deliverability?: number | "N/A";
+  p5_pass?: boolean | "N/A";
+  p6_security?: number;
+  p6_pass?: boolean;
+  p7_integration_fit?: number;
+  p7_pass?: boolean;
+  p8_domain_expertise?: number;
+  p8_pass?: boolean;
+  disqualified?: boolean;
+  disqualification_reason?: string;
+  generated_test_suite?: string;
+  test_summary?: string;
+  top_strength?: string;
+  top_weakness?: string;
 }
 
 interface ClaudeEvalResponse {
@@ -147,6 +169,19 @@ function normalizeTestResults(
   return cleaned;
 }
 
+function pScoresToTestResults(item: ClaudeEvalItem): NormalizedTestResult[] {
+  return [
+    { test_name: "P1 Turing Score",          status: item.p1_pass ? "Pass" : "Fail", observation: `Score: ${item.p1_turing ?? "N/A"}` },
+    { test_name: "P2 Objection Handling",    status: item.p2_pass ? "Pass" : "Fail", observation: `Score: ${item.p2_objection ?? "N/A"}` },
+    { test_name: "P3 Hallucination Rate",    status: item.p3_pass ? "Pass" : "Fail", observation: `Score: ${item.p3_hallucination ?? "N/A"}` },
+    { test_name: "P4 Integration Stability", status: item.p4_pass ? "Pass" : "Fail", observation: `Score: ${item.p4_integration ?? "N/A"}` },
+    { test_name: "P5 Deliverability",        status: item.p5_pass === "N/A" ? "Pass" : item.p5_pass ? "Pass" : "Fail", observation: `Score: ${item.p5_deliverability ?? "N/A"}` },
+    { test_name: "P6 Security",              status: item.p6_pass ? "Pass" : "Fail", observation: `Score: ${item.p6_security ?? "N/A"}` },
+    { test_name: "P7 Integration Fit",       status: item.p7_pass ? "Pass" : "Fail", observation: `Score: ${item.p7_integration_fit ?? "N/A"}` },
+    { test_name: "P8 Domain Expertise",      status: item.p8_pass ? "Pass" : "Fail", observation: `Score: ${item.p8_domain_expertise ?? "N/A"}` },
+  ];
+}
+
 function normalizeEvaluations(candidates: Candidate[], raw: ClaudeEvalItem[] | undefined, runSeed: number) {
   const byId = new Map<string, ClaudeEvalItem>();
 
@@ -160,13 +195,8 @@ function normalizeEvaluations(candidates: Candidate[], raw: ClaudeEvalItem[] | u
 
   const provisional = candidates.map((candidate) => {
     const item = byId.get(candidate.candidate_id);
-    const fitScore = clampToughRange(item?.fit_score ?? (candidate.fit_score_pre_eval ?? 75));
-
-    return {
-      candidate,
-      item,
-      fitScore
-    };
+    const fitScore = clampToughRange(item?.composite_score ?? (candidate.fit_score_pre_eval ?? 75));
+    return { candidate, item, fitScore };
   });
 
   const ranked = [...provisional].sort((a, b) => b.fitScore - a.fitScore);
@@ -177,23 +207,24 @@ function normalizeEvaluations(candidates: Candidate[], raw: ClaudeEvalItem[] | u
     const position = n > 1 ? index / (n - 1) : 0.5;
     const baseScore = 95 - position * 55;
     const jitter = (hashToUnit(`${runSeed}:${entry.candidate.candidate_id}:spread`) - 0.5) * 6;
-    const spreadScore = clampToughRange(baseScore + jitter);
-    spreadById.set(entry.candidate.candidate_id, spreadScore);
+    spreadById.set(entry.candidate.candidate_id, clampToughRange(baseScore + jitter));
   });
 
   return candidates.map((candidate) => {
     const item = byId.get(candidate.candidate_id);
     const fitScore = spreadById.get(candidate.candidate_id) ?? clampToughRange(candidate.fit_score_pre_eval ?? 75);
+    const testResults = item ? pScoresToTestResults(item) : normalizeTestResults(candidate, fitScore, undefined);
 
     return {
       candidate_id: candidate.candidate_id,
       candidate_name: candidate.name,
       fit_score: fitScore,
       analysis:
-        item?.analysis?.trim() ||
+        item?.test_summary?.trim() ||
         `${candidate.name} aligns with core AJD requirements and shows strong implementation potential. ` +
           `Primary risk centers on integration hardening and governance controls under production load.`,
-      test_results: normalizeTestResults(candidate, fitScore, item?.test_results)
+      generated_test_suite: item?.generated_test_suite?.trim() ?? null,
+      test_results: testResults
     };
   });
 }
@@ -349,21 +380,38 @@ export async function POST(request: Request) {
       reason_codes: (candidate.reason_codes || []).slice(0, 2)
     }));
 
+    const agentPrompt = readFileSync(
+      join(process.cwd(), ".claude/prompts/evaluation-agent.md"),
+      "utf-8"
+    );
+
     const requestPayload = {
-      max_tokens: 700,
+      max_tokens: 1600,
       temperature: 0.2,
-      system:
-        "You are a tough evaluator. Do not give safe, middle-of-the-road scores. Identify clear winners and losers. " +
-        "Use full fit_score range 40-95. Return strict JSON only.",
+      system: agentPrompt + "\nReturn strict JSON only. No markdown, no prose.",
       messages: [
         {
           role: "user" as const,
           content:
-            "Evaluate candidates against AJD mission and KPIs. " +
-            "Return JSON: {\"evaluations\":[{\"candidate_id\":\"string\",\"candidate_name\":\"string\",\"analysis\":\"string\",\"fit_score\":85,\"test_results\":[{\"test_name\":\"Mission Alignment\",\"status\":\"Pass\",\"observation\":\"short\"},{\"test_name\":\"KPI Readiness\",\"status\":\"Pass\",\"observation\":\"short\"},{\"test_name\":\"Risk & Guardrails\",\"status\":\"Fail\",\"observation\":\"short\"}]}]}. " +
-            "Each candidate must include at least 3 test_results. " +
-            "Each test observation must reference at least one specific reason_codes detail from that candidate. " +
-            "Do not return tied fit_score values across candidates. " +
+            "Evaluate these candidates against the AJD. " +
+            "First generate the test suite for P2 and P8 from the AJD, then run all 8 parameters per candidate in parallel. " +
+            "Return JSON with this exact shape: " +
+            "{\"generated_test_suite\":\"string summarising P2 scenarios and P8 questions generated\"," +
+            "\"evaluations\":[{" +
+            "\"candidate_id\":\"string\",\"candidate_name\":\"string\"," +
+            "\"composite_score\":85," +
+            "\"p1_turing\":85,\"p1_pass\":true," +
+            "\"p2_objection\":85,\"p2_pass\":true," +
+            "\"p3_hallucination\":85,\"p3_pass\":true," +
+            "\"p4_integration\":85,\"p4_pass\":true," +
+            "\"p5_deliverability\":85,\"p5_pass\":true," +
+            "\"p6_security\":100,\"p6_pass\":true," +
+            "\"p7_integration_fit\":100,\"p7_pass\":true," +
+            "\"p8_domain_expertise\":85,\"p8_pass\":true," +
+            "\"disqualified\":false,\"disqualification_reason\":\"\"," +
+            "\"generated_test_suite\":\"string\"," +
+            "\"test_summary\":\"string\",\"top_strength\":\"string\",\"top_weakness\":\"string\"}]}. " +
+            "Do not return tied composite_score values across candidates. " +
             `AJD: ${JSON.stringify(compactAjd)}. ` +
             `Candidates: ${JSON.stringify(compactCandidates)}. ` +
             `run_seed: ${runSeed}.`

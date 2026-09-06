@@ -1,9 +1,11 @@
 "use client";
 
-import { useMemo } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { APAStatus } from "../../lib/state-machine";
 import { CandidateEvaluationResult, CandidateScorecard } from "../../lib/evaluation-agent/mock";
+import { AJD } from "../../lib/intake-agent/mock";
 import { buildDefaultAssumptions, calculateROI, formatCurrency } from "../../lib/scorecard/roi";
+import { runScorecardAgent, ScorecardResult } from "../../lib/scorecard/client";
 import { StatusPill } from "../ui/status-pill";
 
 // ─── Radar Chart ────────────────────────────────────────────────────────────
@@ -16,6 +18,7 @@ const PARAM_DEFS: Array<{ key: keyof CandidateScorecard; label: string; short: s
   { key: "hallucinationControlScore",label: "Hallucination Control",  short: "Halluc."  },
   { key: "integrationStabilityScore",label: "Integration Stability",  short: "Integr."  },
   { key: "costEfficiencyScore",      label: "Cost Efficiency",        short: "Cost Eff."},
+  { key: "domainExpertiseScore",     label: "Domain Expertise",       short: "Domain"   },
 ];
 
 const N   = PARAM_DEFS.length;
@@ -144,6 +147,7 @@ function ScoreBar({ label, value, color }: { label: string; value: number; color
 
 interface FinalScorecardDashboardProps {
   status: APAStatus;
+  ajd: AJD | null;
   evaluationResults: CandidateEvaluationResult[];
   onDeploy: () => void;
   addLog: (line: string) => void;
@@ -152,13 +156,81 @@ interface FinalScorecardDashboardProps {
 
 export function FinalScorecardDashboard({
   status,
+  ajd,
   evaluationResults,
   onDeploy,
-  addLog: _addLog,
+  addLog,
   onCandidateSelected
 }: FinalScorecardDashboardProps) {
-  const isVisible =
-    status.state === "COMPLETE" || status.state === "SCORECARD";
+  const [scorecard, setScorecard] = useState<ScorecardResult | null>(null);
+  const hasRequestedRef = useRef(false);
+
+  const isVisible = status.state === "COMPLETE" || status.state === "SCORECARD";
+  const isDeployed = status.state === "SCORECARD";
+
+  useEffect(() => {
+    if (status.state === "IDLE" || status.state === "INTAKE") {
+      hasRequestedRef.current = false;
+      setScorecard(null);
+    }
+  }, [status.state]);
+
+  useEffect(() => {
+    if (
+      status.state !== "COMPLETE" ||
+      !ajd ||
+      evaluationResults.length === 0 ||
+      hasRequestedRef.current
+    ) {
+      return;
+    }
+
+    let canceled = false;
+    hasRequestedRef.current = true;
+    addLog("Scorecard Agent started. Generating recommendation and ROI projection.");
+
+    runScorecardAgent(ajd, evaluationResults)
+      .then((result) => {
+        if (canceled) return;
+        setScorecard(result);
+        addLog(`Scorecard ready. Verdict: ${result.recommendation.deploy_verdict} — ${result.recommendation.name}`);
+      })
+      .catch((error) => {
+        if (canceled) return;
+        addLog(`Scorecard Agent error: ${error instanceof Error ? error.message : "Unknown error"}. Using local fallback.`);
+      });
+
+    return () => { canceled = true; };
+  }, [addLog, ajd, evaluationResults, status.state]);
+
+  const rankedResults = useMemo(
+    () =>
+      [...evaluationResults].sort(
+        (a, b) => b.scorecard.compositeScore - a.scorecard.compositeScore
+      ),
+    [evaluationResults]
+  );
+
+  const winner = rankedResults[0];
+
+  const roi = useMemo(() => {
+    if (scorecard?.roi.monthly_value != null) {
+      return {
+        monthlyValue: scorecard.roi.monthly_value,
+        annualValue: scorecard.roi.annual_value ?? scorecard.roi.monthly_value * 12,
+        formulaDisplay: scorecard.roi.formula_shown,
+        costPerResolutionHuman: 28,
+        costPerResolutionAgent: 4.5,
+        savingsPercent: 84
+      };
+    }
+    if (!winner) return null;
+    return calculateROI(buildDefaultAssumptions(winner.scorecard.compositeScore));
+  }, [scorecard, winner]);
+
+  const deployVerdict = scorecard?.recommendation.deploy_verdict ?? "DEPLOY";
+  const deployBlocked = deployVerdict === "REJECT" || deployVerdict === "HOLD";
+  const scorecardNotes = scorecard?.recommendation.verdict_reason ?? scorecard?.notes ?? "";
 
   if (!isVisible) {
     return (
@@ -177,23 +249,6 @@ export function FinalScorecardDashboard({
       </section>
     );
   }
-
-  const isDeployed = status.state === "SCORECARD";
-
-  const rankedResults = useMemo(
-    () =>
-      [...evaluationResults].sort(
-        (a, b) => b.scorecard.compositeScore - a.scorecard.compositeScore
-      ),
-    [evaluationResults]
-  );
-
-  const winner = rankedResults[0];
-
-  const roi = useMemo(() => {
-    if (!winner) return null;
-    return calculateROI(buildDefaultAssumptions(winner.scorecard.compositeScore));
-  }, [winner]);
 
   if (!winner || !roi) return null;
 
@@ -257,7 +312,7 @@ export function FinalScorecardDashboard({
       <div className="grid gap-4 lg:grid-cols-2">
         <div className="command-card p-4">
           <p className="font-mono text-xs uppercase tracking-[0.18em] text-command-muted">
-            7-Parameter Radar
+            8-Parameter Radar
           </p>
           <div className="mt-4">
             <RadarChart results={rankedResults} />
@@ -380,6 +435,20 @@ export function FinalScorecardDashboard({
         </div>
       </div>
 
+      {/* ── Verdict / Notes Banner ── */}
+      {scorecardNotes ? (
+        <div className={`rounded-xl border px-4 py-3 font-mono text-xs ${
+          deployVerdict === "REJECT"
+            ? "border-command-fail/40 bg-command-fail/10 text-command-fail"
+            : deployVerdict === "HOLD"
+            ? "border-command-warning/40 bg-command-warning/10 text-command-warning"
+            : "border-command-action/30 bg-command-action/5 text-command-muted"
+        }`}>
+          <span className="font-semibold uppercase tracking-wide">{deployVerdict}: </span>
+          {scorecardNotes}
+        </div>
+      ) : null}
+
       {/* ── Deploy Button ── */}
       <div className="rounded-xl border border-command-border bg-command-panel p-5">
         <div className="flex flex-wrap items-center justify-between gap-4">
@@ -390,21 +459,25 @@ export function FinalScorecardDashboard({
             <p className="mt-1 text-xs text-command-muted">
               {isDeployed
                 ? `${winner.candidateName} is now live in your environment.`
+                : deployBlocked
+                ? `Deployment blocked — human review required before proceeding.`
                 : `Deploy ${winner.candidateName} as your APA-vetted digital worker.`}
             </p>
           </div>
 
           <button
             type="button"
-            disabled={isDeployed}
+            disabled={isDeployed || deployBlocked}
             onClick={onDeploy}
             className={`min-w-[160px] rounded-xl px-6 py-3 font-mono text-sm font-bold tracking-wide transition ${
               isDeployed
                 ? "cursor-not-allowed border border-command-pass/40 bg-command-pass/10 text-command-pass"
+                : deployBlocked
+                ? "cursor-not-allowed border border-command-warning/40 bg-command-warning/10 text-command-warning"
                 : "border border-command-action bg-command-action text-command-bg hover:bg-command-action/85 shadow-glow"
             }`}
           >
-            {isDeployed ? "✓ DEPLOYED" : "▶ Deploy Agent"}
+            {isDeployed ? "✓ DEPLOYED" : deployBlocked ? `⚠ ${deployVerdict}` : "▶ Deploy Agent"}
           </button>
         </div>
       </div>

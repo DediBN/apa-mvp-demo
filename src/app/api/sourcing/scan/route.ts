@@ -1,3 +1,5 @@
+import { readFileSync } from "fs";
+import { join } from "path";
 import { NextResponse } from "next/server";
 import { createAnthropicClient } from "../../../../lib/anthropic-client";
 import { Candidate } from "../../../../lib/research-agent/mock";
@@ -5,14 +7,22 @@ import { Candidate } from "../../../../lib/research-agent/mock";
 interface ScanRequest {
   jobTitle?: string;
   mission?: string;
+  kpis?: Array<{ name: string; target: string }>;
+  integrations?: Record<string, string>;
+  stack_hint?: string;
+  budget_tier?: string;
 }
 
 interface ClaudeCandidate {
   name: string;
-  source: string;
-  fit_score_pre_eval: number;
-  reason_codes: string[];
-  risk_flags: string[];
+  vendor: string;
+  source_url: string;
+  source_tier: number;
+  fit_score_prelim: number;
+  fit_reason: string;
+  integration_match: string[];
+  pricing_model: string;
+  red_flags: string;
 }
 
 interface ClaudeScanResult {
@@ -83,16 +93,17 @@ function normalizeCandidates(raw: ClaudeCandidate[] | undefined, jobTitle: strin
   const list = Array.isArray(raw) ? raw.slice(0, 5) : [];
 
   const normalized = list
+    .filter((candidate) => Boolean(candidate.source_url))
     .map((candidate, index) => ({
       candidate_id: `cand_scan_${index + 1}`,
       name: candidate.name?.trim() || `${jobTitle} Candidate ${index + 1}`,
-      source: normalizeSource(candidate.source || "Hugging Face"),
-      fit_score_pre_eval: Math.max(60, Math.min(99, Math.round(candidate.fit_score_pre_eval || 75))),
-      reason_codes: Array.isArray(candidate.reason_codes) && candidate.reason_codes.length > 0
-        ? candidate.reason_codes.slice(0, 2)
+      source: normalizeSource(candidate.vendor || "Hugging Face"),
+      fit_score_pre_eval: Math.max(60, Math.min(99, Math.round(candidate.fit_score_prelim || 75))),
+      reason_codes: candidate.fit_reason
+        ? [candidate.fit_reason, candidate.pricing_model || "Pricing available"].slice(0, 2)
         : ["Capability fit inferred from AJD", "Mission alignment estimated"],
-      risk_flags: Array.isArray(candidate.risk_flags) && candidate.risk_flags.length > 0
-        ? candidate.risk_flags.slice(0, 2)
+      risk_flags: candidate.red_flags
+        ? [candidate.red_flags]
         : ["Requires sandbox evaluation"]
     }))
     .filter((candidate) => Boolean(candidate.name));
@@ -109,24 +120,35 @@ export async function POST(request: Request) {
     const body = (await request.json()) as ScanRequest;
     const jobTitle = body.jobTitle?.trim() || "Automation Agent";
     const mission = body.mission?.trim() || "Automate workflows with measurable KPI outcomes";
+    const kpis = body.kpis ?? [];
+    const integrations = body.integrations ?? {};
+    const stackHint = body.stack_hint?.trim() || "neutral";
+    const budgetTier = body.budget_tier?.trim() || "smb";
 
-    // Keep this endpoint resilient for demo mode even when mission is partially missing.
+    const agentPrompt = readFileSync(
+      join(process.cwd(), ".claude/prompts/research-agent.md"),
+      "utf-8"
+    );
 
     const anthropic = createAnthropicClient();
 
     const requestPayload = {
       max_tokens: 900,
       temperature: 0.3,
-      system:
-        "You simulate an AI agent marketplace analyst. Return strict JSON only. No markdown, no prose.",
+      system: agentPrompt + "\nReturn strict JSON only. No markdown, no prose.",
       messages: [
         {
           role: "user" as const,
           content:
-            "Simulate a market scan and return 3 to 5 AI agent candidates for this AJD. " +
-            "Return JSON only using this exact shape: " +
-            '{"candidates":[{"name":"string","source":"Hugging Face|OpenAI|CrewAI","fit_score_pre_eval":85,"reason_codes":["string","string"],"risk_flags":["string"]}]}. ' +
-            `AJD job title: ${jobTitle}. AJD mission: ${mission}.`
+            "Run a sourcing scan for this AJD and return JSON only.\n" +
+            `job_title: ${jobTitle}\n` +
+            `business_need: ${mission}\n` +
+            `kpis: ${JSON.stringify(kpis)}\n` +
+            `integrations: ${JSON.stringify(integrations)}\n` +
+            `stack_hint: ${stackHint}\n` +
+            `budget_tier: ${budgetTier}\n` +
+            "Return JSON with this exact shape: " +
+            '{"candidates":[{"name":"","vendor":"","source_url":"","source_tier":1,"fit_score_prelim":0,"fit_reason":"","integration_match":[],"pricing_model":"","red_flags":""}]}'
         }
       ]
     };

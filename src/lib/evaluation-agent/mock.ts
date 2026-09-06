@@ -18,6 +18,7 @@ export interface CandidateScorecard {
   hallucinationControlScore: number;
   integrationStabilityScore: number;
   costEfficiencyScore: number;
+  domainExpertiseScore: number;
   compositeScore: number;
 }
 
@@ -115,15 +116,17 @@ export function buildScorecard(input: {
   const hallucinationControlScore = clamp(hallucinationRate * 100);
   const integrationStabilityScore = clamp(45 + fit * 0.4 + objectionRate * 18);
   const costEfficiencyScore = clamp(90 - fit * 0.25 + hallucinationRate * 10);
+  const domainExpertiseScore = clamp(38 + fit * 0.45 + hallucinationRate * 22);
 
   const compositeScore = clamp(
-    turingScore * 0.16 +
-      securityScore * 0.13 +
-      reliabilityScore * 0.13 +
-      objectionHandlingScore * 0.18 +
-      hallucinationControlScore * 0.18 +
-      integrationStabilityScore * 0.14 +
-      costEfficiencyScore * 0.08
+    turingScore * 0.15 +
+      securityScore * 0.10 +
+      reliabilityScore * 0.10 +
+      objectionHandlingScore * 0.20 +
+      hallucinationControlScore * 0.20 +
+      integrationStabilityScore * 0.15 +
+      costEfficiencyScore * 0.05 +
+      domainExpertiseScore * 0.05
   );
 
   return {
@@ -134,6 +137,7 @@ export function buildScorecard(input: {
     hallucinationControlScore,
     integrationStabilityScore,
     costEfficiencyScore,
+    domainExpertiseScore,
     compositeScore
   };
 }

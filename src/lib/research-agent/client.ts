@@ -3,6 +3,10 @@ import { Candidate } from "./mock";
 interface ScanInput {
   jobTitle: string;
   mission: string;
+  kpis?: Array<{ name: string; target: string }>;
+  integrations?: Record<string, string>;
+  stack_hint?: string;
+  budget_tier?: string;
 }
 
 export async function runSourcingScan(input: ScanInput): Promise<Candidate[]> {

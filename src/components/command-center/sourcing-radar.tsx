@@ -97,7 +97,11 @@ export function SourcingRadar({ status, ajd, onShortlistReady, onFail, addLog }:
 
     runSourcingScan({
       jobTitle,
-      mission
+      mission,
+      kpis: ajd.agent_profile?.kpis ?? [],
+      integrations: ajd.integrations as Record<string, string> ?? {},
+      stack_hint: "neutral",
+      budget_tier: "smb"
     })
       .then((candidates) => {
         if (canceled) {

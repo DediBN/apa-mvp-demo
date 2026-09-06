@@ -61,6 +61,7 @@ function buildScorecardFromFit(fitScore: number, candidateId: string): Candidate
   const n5 = hashToUnit(`${candidateId}:hallucination`);
   const n6 = hashToUnit(`${candidateId}:integration`);
   const n7 = hashToUnit(`${candidateId}:cost`);
+  const n8 = hashToUnit(`${candidateId}:domain`);
 
   const turingScore = clamp(fit + 3 + (n1 - 0.5) * 8);
   const securityScore = clamp(fit - 2 + (n2 - 0.5) * 7);
@@ -69,15 +70,17 @@ function buildScorecardFromFit(fitScore: number, candidateId: string): Candidate
   const hallucinationControlScore = clamp(fit - 3 + (n5 - 0.5) * 6);
   const integrationStabilityScore = clamp(fit + (n6 - 0.5) * 5);
   const costEfficiencyScore = clamp(68 + (fit - 68) * 0.55 + (n7 - 0.5) * 9);
+  const domainExpertiseScore = clamp(fit - 2 + (n8 - 0.5) * 8);
 
   const compositeScore = Math.round(
-    turingScore * 0.16 +
-      securityScore * 0.13 +
-      reliabilityScore * 0.13 +
-      objectionHandlingScore * 0.18 +
-      hallucinationControlScore * 0.18 +
-      integrationStabilityScore * 0.14 +
-      costEfficiencyScore * 0.08
+    turingScore * 0.15 +
+      securityScore * 0.10 +
+      reliabilityScore * 0.10 +
+      objectionHandlingScore * 0.20 +
+      hallucinationControlScore * 0.20 +
+      integrationStabilityScore * 0.15 +
+      costEfficiencyScore * 0.05 +
+      domainExpertiseScore * 0.05
   );
 
   return {
@@ -88,6 +91,7 @@ function buildScorecardFromFit(fitScore: number, candidateId: string): Candidate
     hallucinationControlScore,
     integrationStabilityScore,
     costEfficiencyScore,
+    domainExpertiseScore,
     compositeScore
   };
 }
@@ -393,7 +397,7 @@ export function EvaluationCommandCenter({ status, ajd, candidates, onEvaluationD
       <header className="mb-5 flex flex-wrap items-center justify-between gap-3">
         <div>
           <h2 className="font-mono text-sm uppercase tracking-[0.18em] text-command-muted">Step 03 · Evaluation Command Center</h2>
-          <p className="mt-1 text-lg font-semibold text-command-text">Parallel lanes, live scenario logs, and 7-parameter scorecards</p>
+          <p className="mt-1 text-lg font-semibold text-command-text">Parallel lanes, live scenario logs, and 8-parameter scorecards</p>
         </div>
         <StatusPill label={isRunning ? "RUNNING" : "COMPLETE"} tone={isRunning ? "action" : "pass"} />
       </header>
@@ -497,7 +501,7 @@ export function EvaluationCommandCenter({ status, ajd, candidates, onEvaluationD
 
               {lane.scorecard ? (
                 <div className="mt-3 rounded-lg border border-command-border bg-command-bg/70 p-3">
-                  <p className="font-mono text-[11px] uppercase tracking-[0.12em] text-command-muted">7-Parameter Scorecard</p>
+                  <p className="font-mono text-[11px] uppercase tracking-[0.12em] text-command-muted">8-Parameter Scorecard</p>
                   <div className="mt-2 grid grid-cols-2 gap-2 text-xs text-command-text">
                     <p>Turing: {lane.scorecard.turingScore}</p>
                     <p>Security: {lane.scorecard.securityScore}</p>
@@ -506,7 +510,8 @@ export function EvaluationCommandCenter({ status, ajd, candidates, onEvaluationD
                     <p>Hallucination: {lane.scorecard.hallucinationControlScore}</p>
                     <p>Integration: {lane.scorecard.integrationStabilityScore}</p>
                     <p>Cost: {lane.scorecard.costEfficiencyScore}</p>
-                    <p className="font-semibold text-command-action">Composite: {lane.scorecard.compositeScore}</p>
+                    <p>Domain: {lane.scorecard.domainExpertiseScore}</p>
+                    <p className="font-semibold text-command-action col-span-2">Composite: {lane.scorecard.compositeScore}</p>
                   </div>
                 </div>
               ) : null}
