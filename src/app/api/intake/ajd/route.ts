@@ -81,10 +81,6 @@ export async function POST(request: Request) {
     const body = (await request.json()) as { businessNeed?: string };
     const businessNeed = body.businessNeed?.trim();
 
-    console.log("--- DEBUG START ---");
-    console.log("Using Key (first 10):", process.env.ANTHROPIC_API_KEY?.slice(0, 10));
-    console.log("Payload:", body);
-
     if (!businessNeed) {
       return NextResponse.json({ error: "businessNeed is required" }, { status: 400 });
     }
