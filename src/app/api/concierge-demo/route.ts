@@ -68,6 +68,44 @@ Respond ONLY with JSON (no markdown fences, no preamble):
   "summary": "2-3 sentence plain-language summary of what this demonstrates and what it doesn't"
 }`;
 
+// Recovers the complete items from a JSON response that was cut off mid-way.
+function salvageItems(text: string): { items: unknown[]; summary: string } | null {
+  const start = text.indexOf("[", text.indexOf('"items"'));
+  if (start < 0) return null;
+  const items: unknown[] = [];
+  let depth = 0;
+  let inString = false;
+  let escaped = false;
+  let itemStart = -1;
+  for (let i = start + 1; i < text.length; i += 1) {
+    const ch = text[i];
+    if (inString) {
+      if (escaped) escaped = false;
+      else if (ch === "\\") escaped = true;
+      else if (ch === '"') inString = false;
+      continue;
+    }
+    if (ch === '"') inString = true;
+    else if (ch === "{") {
+      if (depth === 0) itemStart = i;
+      depth += 1;
+    } else if (ch === "}") {
+      depth -= 1;
+      if (depth === 0 && itemStart >= 0) {
+        try {
+          items.push(JSON.parse(text.slice(itemStart, i + 1)));
+        } catch {
+          // skip a malformed item
+        }
+        itemStart = -1;
+      }
+    } else if (ch === "]" && depth === 0) break;
+  }
+  return items.length > 0
+    ? { items, summary: `The output was longer than the limit; the first ${items.length} complete findings are shown.` }
+    : null;
+}
+
 export async function POST(req: NextRequest) {
   try {
     const { action_description, customer_data, reference_data, skill_md, skill_name } =
@@ -86,7 +124,7 @@ export async function POST(req: NextRequest) {
 
     const response = await anthropic.messages.create({
       model: process.env.APA_SKILLS_MODEL?.trim() || "claude-sonnet-5",
-      max_tokens: 6000,
+      max_tokens: 10000,
       system: skill_md?.trim() ? SYSTEM_PROMPT + skillBlock(skill_md, skill_name) : SYSTEM_PROMPT,
       messages: [{ role: "user", content: userContent }],
     });
@@ -108,6 +146,11 @@ export async function POST(req: NextRequest) {
       } catch {
         parsed = null;
       }
+    }
+
+    // Cut-off output: keep every complete item instead of discarding the whole run.
+    if ((!parsed || !Array.isArray(parsed.items)) && response.stop_reason === "max_tokens") {
+      parsed = salvageItems(cleaned);
     }
 
     // A failed parse must surface as an error, never as an empty result (empty reads as "found nothing").

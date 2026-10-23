@@ -31,6 +31,7 @@ Then concise Markdown instructions that a capable model follows on the business'
 - how to present results: exceptions first, each with the evidence row/line, then a short summary of what checked out
 - what to do when data is missing or ambiguous: say so, never guess
 - no scripts, no code to execute, no network access, no external tools
+- keep the requested output focused: the most important findings first, no exhaustive line-by-line commentary
 
 Write for the process described, not a generic template. Keep it under 900 words. No preamble, no code fences around the file.`;
 
