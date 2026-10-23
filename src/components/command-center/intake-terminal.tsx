@@ -11,6 +11,9 @@ import { FinalScorecardDashboard } from "./final-scorecard-dashboard";
 import { DetailedCandidateScorecard } from "./detailed-candidate-scorecard";
 import { ResultSummaryCard } from "./result-summary-card";
 import { AgentReadinessCheck } from "./agent-readiness-check";
+import { SkillEvaluationCenter } from "./skill-evaluation-center";
+
+const SHOW_AGENT_SCORECARD = false;
 import { Candidate } from "../../lib/research-agent/mock";
 import { CandidateEvaluationResult } from "../../lib/evaluation-agent/mock";
 import { buildDefaultAssumptions, calculateROI } from "../../lib/scorecard/roi";
@@ -61,7 +64,6 @@ export function IntakeTerminal() {
   const [evaluationResults, setEvaluationResults] = useState<CandidateEvaluationResult[]>([]);
   const [selectedCandidateId, setSelectedCandidateId] = useState<string | null>(null);
   const [readinessAjd, setReadinessAjd] = useState<AJD | null>(null);
-  const [skillCheckOpen, setSkillCheckOpen] = useState(false);
   const [logs, setLogs] = useState<string[]>([
     `[${buildTimestamp()}] System ready. State=IDLE`
   ]);
@@ -300,7 +302,6 @@ export function IntakeTerminal() {
     setReviewMission("");
     setReviewKpis("");
     setShortlist([]);
-    setSkillCheckOpen(false);
     setEvaluationResults([]);
     setSelectedCandidateId(null);
     addLog("Run reset. State=IDLE");
@@ -491,42 +492,20 @@ export function IntakeTerminal() {
           onShortlistReady={handleShortlistReady}
           onFail={handleResearchFail}
         />
-        {ajd && shortlist.some((c) => c.skill) ? (
-          skillCheckOpen ? (
-            <AgentReadinessCheck
-              ajd={buildApprovedAjd(ajd)}
-              candidates={shortlist}
-              onClose={() => setSkillCheckOpen(false)}
-            />
-          ) : (
-            <div className="mt-3 flex justify-end">
-              <button
-                type="button"
-                onClick={() => {
-                  setSkillCheckOpen(true);
-                  addLog("Opened skill readiness check: shortlisted skills vs no-skill baseline on real data.");
-                }}
-                className="rounded-lg border border-command-border bg-transparent px-5 py-2.5 font-mono text-sm font-semibold text-command-text transition hover:border-command-action hover:text-command-action"
-              >
-                Test Shortlisted Skills on Real Data
-              </button>
-            </div>
-          )
-        ) : null}
       </div>
 
       <div className="mt-5">
-        <EvaluationCommandCenter
+        <SkillEvaluationCenter
           status={status}
-          ajd={ajd}
+          ajd={ajd ? buildApprovedAjd(ajd) : null}
           candidates={shortlist}
           addLog={addLog}
           onEvaluationDone={handleEvaluationDone}
-          onFail={handleEvaluationFail}
-          onCandidateSelected={handleCandidateSelection}
         />
       </div>
 
+      {/* Agent-era scorecard (simulated parameters) is not shown in skill mode — Step 03 holds the measured results. */}
+      {SHOW_AGENT_SCORECARD ? (
       <div className="mt-5">
         <FinalScorecardDashboard
           status={status}
@@ -537,8 +516,9 @@ export function IntakeTerminal() {
           onCandidateSelected={handleCandidateSelection}
         />
       </div>
+      ) : null}
 
-      {selectedCandidateId && evaluationResults.length > 0 ? (
+      {SHOW_AGENT_SCORECARD && selectedCandidateId && evaluationResults.length > 0 ? (
         (() => {
           const selected = evaluationResults.find((r) => r.candidateId === selectedCandidateId);
           return selected ? (
