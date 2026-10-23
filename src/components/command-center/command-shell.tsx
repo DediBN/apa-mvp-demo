@@ -7,17 +7,24 @@ import { StatusPill } from "../ui/status-pill";
 
 type Tab = "acquisition" | "fleet";
 
+const SHOW_FLEET_TAB = false;
+
 const TABS: Array<{ id: Tab; label: string; description: string }> = [
   {
     id: "acquisition",
-    label: "Acquisition Pipeline",
-    description: "4-step agent evaluation flow"
+    label: "Skill Acquisition",
+    description: "Find, test and install a skill"
   },
-  {
-    id: "fleet",
-    label: "Fleet Management",
-    description: "Active agent monitoring"
-  }
+  // Fleet Management (mock dashboard of deployed agents) is hidden in skill mode; to be rebuilt as an installed-skills registry.
+  ...(SHOW_FLEET_TAB
+    ? [
+        {
+          id: "fleet" as Tab,
+          label: "Fleet Management",
+          description: "Active agent monitoring"
+        }
+      ]
+    : [])
 ];
 
 export function CommandShell() {

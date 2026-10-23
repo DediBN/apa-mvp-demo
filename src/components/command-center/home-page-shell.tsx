@@ -46,10 +46,10 @@ function HomePageContent() {
       <section className="mb-6 command-card p-5 md:p-6 animate-fadeUp">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div>
-            <p className="font-mono text-xs uppercase tracking-[0.22em] text-command-action animate-pulseLine">Agentic Process Authority</p>
-            <h1 className="mt-2 text-2xl font-semibold tracking-tight text-command-text md:text-3xl">Meta-Agent Command Center</h1>
+            <p className="font-mono text-xs uppercase tracking-[0.22em] text-command-action animate-pulseLine">APA · Skill Acquisition</p>
+            <h1 className="mt-2 text-2xl font-semibold tracking-tight text-command-text md:text-3xl">Skill Command Center</h1>
             <p className="mt-2 max-w-2xl text-sm text-command-muted md:text-base">
-              Acquisition pipeline and live fleet management for your deployed AI agents.
+              Describe a business need — find, test and install the right Claude skill for it.
             </p>
           </div>
 

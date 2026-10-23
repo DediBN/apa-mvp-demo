@@ -25,7 +25,7 @@ export interface CandidateScorecard {
 export interface CandidateEvaluationResult {
   candidateId: string;
   candidateName: string;
-  candidateSource: "OpenAI" | "Hugging Face" | "CrewAI";
+  candidateSource: "OpenAI" | "Hugging Face" | "CrewAI" | "SkillsMP" | "skills.sh" | "Custom Skill";
   objectionPasses: number;
   hallucinationPasses: number;
   scorecard: CandidateScorecard;

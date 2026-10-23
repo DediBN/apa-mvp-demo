@@ -41,6 +41,12 @@ Each agent has a `mock.ts` (types + static data) and a `client.ts` (fetches the 
 | Intake | `/api/intake/ajd` | Converts business need → AJD JSON via Claude |
 | Research (Sourcing) | `/api/sourcing/scan` | Returns candidate shortlist |
 | Evaluation | `/api/evaluation/run` | Runs 40 objection + 30 hallucination scenarios per candidate |
+| Skill Sourcing | `/api/sourcing/skills` | AJD → queries → SkillsMP + skills.sh → SKILL.md from GitHub → Claude screening → up to 3 skills + custom-skill option + no-skill baseline |
+| Readiness Check | `/api/concierge-demo` | Runs the AJD action on pasted real data; with `skill_md` it runs with that skill installed |
+
+### Skill mode (branch `feature/skill-acquisition`)
+
+The Sourcing Radar now sources **Claude Agent Skills** instead of agents (`src/lib/skills/`). Each directory is optional — a missing key skips that source (see `.env.example`). Executable parts of third-party skills are never run; only SKILL.md text is used. Step 03 is `SkillEvaluationCenter`: the user uploads real data (+ optional reference and answer key), every option runs the task via `/api/concierge-demo` (directory skills, a custom skill authored from the AJD via `/api/skills/author`, and a no-skill baseline), then `/api/skills/judge` scores all outputs against one ground truth (answer key, or an independent audit). Scores are computed from counts: 60% recall + 30% precision + 10% grounding. Without real data (default), `/api/skills/scenarios` generates 2 synthetic test sets with answer keys from the AJD (standard + hard, two parallel calls; the generator never sees any skill) and results are aggregated across sets. The winner downloads as a skill .zip. The agent-era Step 04 scorecard (simulated parameters) is hidden via `SHOW_AGENT_SCORECARD`.
 
 `src/lib/anthropic-client.ts` — server-only singleton that reads `ANTHROPIC_API_KEY`. The intake route uses a model fallback chain starting with `claude-3-5-sonnet-latest`.
 

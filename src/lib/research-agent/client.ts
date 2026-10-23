@@ -92,3 +92,29 @@ export async function runSourcingScan(input: ScanInput): Promise<Candidate[]> {
 
   return data.candidates.map((candidate, index) => mapCandidate(candidate, index));
 }
+
+// ─── Skill sourcing (SkillsMP + skills.sh) ──────────────────────────────────
+
+export interface SkillScanMeta {
+  queries?: { semantic_query: string; keyword_queries: string[] };
+  found?: { skillsmp: number; skills_sh: number; unique: number };
+  readable_skill_md?: number;
+  sources_enabled?: { skillsmp: boolean; skills_sh: boolean };
+}
+
+export async function runSkillSourcingScan(input: Pick<ScanInput, "jobTitle" | "mission" | "kpis">): Promise<{ candidates: Candidate[]; meta: SkillScanMeta }> {
+  const response = await fetch("/api/sourcing/skills", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(input)
+  });
+
+  const data = (await response.json()) as { candidates?: Candidate[]; meta?: SkillScanMeta; error?: string };
+
+  if (!response.ok || !Array.isArray(data.candidates)) {
+    throw new Error(data.error || "Failed to run skill sourcing scan");
+  }
+
+  // The route already returns the Candidate shape (including skill details) — pass it through unchanged.
+  return { candidates: data.candidates, meta: data.meta ?? {} };
+}

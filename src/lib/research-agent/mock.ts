@@ -1,12 +1,27 @@
 import { AJD } from "../intake-agent/mock";
 
+export type CandidateSource = "Hugging Face" | "OpenAI" | "CrewAI" | "SkillsMP" | "skills.sh" | "Custom Skill";
+
+export interface SkillCandidateDetails {
+  directory: "SkillsMP" | "skills.sh" | "Custom";
+  author: string;
+  githubUrl?: string;
+  rawUrl?: string;
+  pageUrl?: string;
+  stars?: number;
+  installs?: number;
+  // SKILL.md text, carried to the Readiness Check so it can run the skill on real data
+  content?: string;
+}
+
 export interface Candidate {
   candidate_id: string;
   name: string;
-  source: "Hugging Face" | "OpenAI" | "CrewAI";
+  source: CandidateSource;
   fit_score_pre_eval: number;
   reason_codes: string[];
   risk_flags: string[];
+  skill?: SkillCandidateDetails;
 }
 
 const SIMULATED_SCAN_MS = 1600;

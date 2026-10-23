@@ -150,7 +150,7 @@ function ScoreRow({ label, value, color = "#64FFDA" }: { label: string; value: n
 
 // ─── Deployment & Source Mapping ────────────────────────────────────────────
 
-function getSourceInfo(source: "OpenAI" | "Hugging Face" | "CrewAI"): { label: string; url: string } {
+function getSourceInfo(source: "OpenAI" | "Hugging Face" | "CrewAI" | "SkillsMP" | "skills.sh" | "Custom Skill"): { label: string; url: string } {
   switch (source) {
     case "OpenAI":
       return {
@@ -167,10 +167,16 @@ function getSourceInfo(source: "OpenAI" | "Hugging Face" | "CrewAI"): { label: s
         label: "Source: CrewAI Marketplace",
         url: "https://crewai.io"
       };
+    case "SkillsMP":
+      return { label: "Source: SkillsMP", url: "https://skillsmp.com" };
+    case "skills.sh":
+      return { label: "Source: skills.sh", url: "https://skills.sh" };
+    case "Custom Skill":
+      return { label: "Source: Custom skill authored from the AJD", url: "https://github.com/anthropics/skills" };
   }
 }
 
-function handleDeployment(candidateName: string, source: "OpenAI" | "Hugging Face" | "CrewAI") {
+function handleDeployment(candidateName: string, source: "OpenAI" | "Hugging Face" | "CrewAI" | "SkillsMP" | "skills.sh" | "Custom Skill") {
   // In a real implementation, this would trigger the APA integration
   const sourceInfo = getSourceInfo(source);
   alert(

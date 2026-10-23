@@ -43,7 +43,7 @@ function normalizeClaudeAJD(raw: ClaudeAJD, businessNeed: string): AJD {
   }
 
   return {
-    job_title: raw.role || "Automation Agent",
+    job_title: raw.role || "Business Skill",
     business_need: businessNeed,
     domain: raw.domain || "General Operations",
     required_capabilities: techSpecs.slice(0, 3),
@@ -68,7 +68,7 @@ function normalizeClaudeAJD(raw: ClaudeAJD, businessNeed: string): AJD {
       cannot_access: ["payment credentials", "raw PII"]
     },
     agent_profile: {
-      role: raw.role || "Automation Agent",
+      role: raw.role || "Business Skill",
       mission: raw.mission || "Improve process efficiency",
       kpis,
       tech_specs: techSpecs
@@ -90,7 +90,7 @@ export async function POST(request: Request) {
       max_tokens: 900,
       temperature: 0.2,
       system:
-        "You are an enterprise solutions architect. Return strict JSON only. No markdown, no prose.",
+        "You define Claude Agent Skills for business processes. \"role\" is a short name for the skill (e.g. \"Supplier Invoice Checker\") — never use the word Agent. \"mission\" says what the skill makes Claude do. \"tech_specs\" are the concrete capabilities the skill needs. Return strict JSON only. No markdown, no prose.",
       messages: [
         {
           role: "user" as const,
@@ -103,6 +103,7 @@ export async function POST(request: Request) {
     };
 
     const modelFallbackChain = [
+      "claude-sonnet-5-5",
       "claude-3-5-sonnet-latest",
       "claude-3-opus-latest",
       "claude-sonnet-4-6",
