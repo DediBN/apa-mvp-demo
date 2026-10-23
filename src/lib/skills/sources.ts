@@ -199,25 +199,78 @@ export function rawSkillMdUrls(githubUrl: string, skillName?: string): string[] 
   return urls;
 }
 
+async function fetchText(url: string, timeoutMs = 6000, headers: Record<string, string> = {}): Promise<string | null> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const res = await fetch(url, { signal: controller.signal, cache: "no-store", headers });
+    return res.ok ? await res.text() : null;
+  } catch {
+    return null;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+// One GitHub tree listing per repo per request (60/h unauthenticated; set GITHUB_TOKEN to raise it).
+const treeCache = new Map<string, Promise<string[]>>();
+
+function listSkillMdPaths(owner: string, repo: string): Promise<string[]> {
+  const key = `${owner}/${repo}`.toLowerCase();
+  const cached = treeCache.get(key);
+  if (cached) return cached;
+  const token = process.env.GITHUB_TOKEN?.trim();
+  const promise = fetchText(
+    `https://api.github.com/repos/${owner}/${repo}/git/trees/HEAD?recursive=1`,
+    8000,
+    { Accept: "application/vnd.github+json", ...(token ? { Authorization: `Bearer ${token}` } : {}) }
+  ).then((text) => {
+    if (!text) return [];
+    try {
+      const tree = (JSON.parse(text) as { tree?: Array<{ path?: string; type?: string }> }).tree ?? [];
+      return tree.filter((t) => t.type === "blob" && /(^|\/)SKILL\.md$/i.test(t.path ?? "")).map((t) => t.path as string);
+    } catch {
+      return [];
+    }
+  });
+  treeCache.set(key, promise);
+  return promise;
+}
+
+function pickSkillPath(paths: string[], slug: string, subPath: string): string | null {
+  if (paths.length === 0) return null;
+  const dirOf = (p: string) => p.replace(/\/?SKILL\.md$/i, "");
+  const last = (p: string) => dirOf(p).split("/").pop()?.toLowerCase() ?? "";
+  const norm = (v: string) => v.toLowerCase().replace(/[^a-z0-9]+/g, "-");
+  return (
+    (subPath && paths.find((p) => dirOf(p).toLowerCase() === subPath.toLowerCase().replace(/\/$/, ""))) ||
+    paths.find((p) => norm(last(p)) === slug) ||
+    paths.find((p) => norm(last(p)).includes(slug) || slug.includes(norm(last(p)) || "\u0000")) ||
+    (paths.length === 1 ? paths[0] : null)
+  );
+}
+
 export async function fetchSkillMd(hit: SkillHit): Promise<{ content: string; rawUrl: string } | null> {
   const slug = hit.name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
-  for (const rawUrl of rawSkillMdUrls(hit.githubUrl, slug)) {
-    try {
-      const controller = new AbortController();
-      const timer = setTimeout(() => controller.abort(), 6000);
-      const res = await fetch(rawUrl, { signal: controller.signal, cache: "no-store" });
-      clearTimeout(timer);
-      if (res.ok) {
-        const content = await res.text();
-        if (content.trim()) {
-          return { content: content.slice(0, 40000), rawUrl };
-        }
-      }
-    } catch {
-      // try next candidate URL
-    }
+
+  // 1. Cheap guesses at the usual locations (raw.githubusercontent.com, no rate limit).
+  const guesses = rawSkillMdUrls(hit.githubUrl, slug);
+  const results = await Promise.all(guesses.map(async (rawUrl) => ({ rawUrl, text: await fetchText(rawUrl) })));
+  const hitGuess = results.find((r) => r.text?.trim());
+  if (hitGuess?.text) {
+    return { content: hitGuess.text.slice(0, 40000), rawUrl: hitGuess.rawUrl };
   }
-  return null;
+
+  // 2. Fallback: list the repo's SKILL.md files and pick the one that matches this skill.
+  const match = hit.githubUrl.match(/github\.com\/([^/]+)\/([^/#?]+)(?:\/(?:tree|blob)\/[^/]+\/(.*))?/);
+  if (!match) return null;
+  const [, owner, repoRaw, subPath = ""] = match;
+  const repo = repoRaw.replace(/\.git$/, "");
+  const path = pickSkillPath(await listSkillMdPaths(owner, repo), slug, subPath.replace(/\/?SKILL\.md$/i, ""));
+  if (!path) return null;
+  const rawUrl = `https://raw.githubusercontent.com/${owner}/${repo}/HEAD/${path}`;
+  const text = await fetchText(rawUrl);
+  return text?.trim() ? { content: text.slice(0, 40000), rawUrl } : null;
 }
 
 // Signals the screener cannot see from SKILL.md text alone.

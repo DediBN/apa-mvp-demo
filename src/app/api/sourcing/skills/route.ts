@@ -38,10 +38,11 @@ interface ScreeningResult {
   }>;
 }
 
-const MAX_TO_FETCH = 10;
-const MAX_SHORTLIST = 3; // + custom skill + no-skill baseline = 5 cards max
+const MAX_TO_FETCH = 24;
+const MAX_SHORTLIST = 4; // directory skills tested; + custom skill + no-skill baseline
+const MIN_SKILLS = 3; // always test at least this many directory skills when that many are readable
 const MIN_FIT = 40;
-const SKILL_EXCERPT_CHARS = 3500;
+const SKILL_EXCERPT_CHARS = 2500;
 const SKILL_CARRY_CHARS = 20000;
 
 function heuristicPlan(jobTitle: string, mission: string): QueryPlan {
@@ -126,11 +127,13 @@ export async function POST(request: Request) {
     const plan = await planQueries(jobTitle, mission, body.kpis);
 
     // 2. Search both directories in parallel (SkillsMP quota is ~500/day: 1 semantic + 1 keyword call per run)
-    const [mpSemantic, mpKeyword, ...shResults] = await Promise.all([
+    const [mpSemantic, mpKeyword1, mpKeyword2, ...shResults] = await Promise.all([
       searchSkillsMp(plan.semantic_query, "semantic"),
       searchSkillsMp(plan.keyword_queries[0] ?? "", "keyword"),
+      searchSkillsMp(plan.keyword_queries[1] ?? "", "keyword"),
       ...plan.keyword_queries.map((q) => searchSkillsSh(q, oidcHeader))
     ]);
+    const mpKeyword = [...mpKeyword1, ...mpKeyword2];
     const shHits = shResults.flat();
     const allHits = dedupeHits([...mpSemantic, ...shHits, ...mpKeyword]);
 
@@ -171,7 +174,7 @@ export async function POST(request: Request) {
           `JOB DESCRIPTION\njob_title: ${jobTitle}\nmission: ${mission}\nkpis: ${JSON.stringify(body.kpis ?? [])}\n\n` +
             `CANDIDATE SKILLS\n${dossier}\n\n` +
             'Return {"results":[{"index":0,"fit_score":0-100,"fit_reason":"one line, concrete","gaps":"one line: what the job needs that this skill does not cover"}]} for every candidate.',
-          1800
+          4000
         );
       } catch (error) {
         console.warn("[skills] screening failed:", error instanceof Error ? error.message : error);
@@ -185,8 +188,9 @@ export async function POST(request: Request) {
         .filter(({ verdict }) => Boolean(verdict))
         .sort((a, b) => (b.verdict?.fit_score ?? 0) - (a.verdict?.fit_score ?? 0));
       const passing = scored.filter(({ verdict }) => (verdict?.fit_score ?? 0) >= MIN_FIT).slice(0, MAX_SHORTLIST);
-      // If nothing passes, still show the best weak match (flagged) so the comparison has a real directory skill.
-      const shortlisted = passing.length > 0 ? passing : scored.slice(0, 1);
+      // Always test at least MIN_SKILLS directory skills: top up with the best weaker matches (flagged as weak fit).
+      const topUp = scored.filter((entry) => !passing.includes(entry)).slice(0, Math.max(0, MIN_SKILLS - passing.length));
+      const shortlisted = [...passing, ...topUp];
 
       candidates = await Promise.all(
         shortlisted.map(async ({ entry, verdict }, i) => {
@@ -203,7 +207,7 @@ export async function POST(request: Request) {
             fit_score_pre_eval: Math.max(0, Math.min(100, Math.round(verdict?.fit_score ?? 0))),
             reason_codes: [verdict?.fit_reason || hit.description || "Matched the Skill Spec", popularityLine || `by ${hit.author || "unknown"}`],
             risk_flags: [
-              ...((verdict?.fit_score ?? 0) < MIN_FIT ? ["Below screening threshold — weak fit, shown for comparison only"] : []),
+              ...((verdict?.fit_score ?? 0) < MIN_FIT ? ["Weak fit at screening — tested anyway so at least 3 skills are compared"] : []),
               ...(verdict?.gaps ? [`Gap: ${verdict.gaps}`] : []),
               ...skillMdRiskSignals(content),
               ...(license ? [license] : []),
