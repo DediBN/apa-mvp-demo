@@ -16,7 +16,14 @@ export interface OptionScore {
 }
 
 export interface JudgeResponse {
-  ground_truth: "answer_key" | "independent_audit";
+  ground_truth: "answer_key" | "independent_audit" | "generated_scenarios";
   issues: Array<{ id: string; description: string }>;
   scores: OptionScore[];
+}
+
+export interface GeneratedScenario {
+  title: string;
+  customer_data: string;
+  reference_data: string;
+  answer_key: string;
 }

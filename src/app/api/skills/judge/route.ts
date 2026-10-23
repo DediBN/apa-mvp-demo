@@ -40,13 +40,15 @@ const MAX = 18000;
 
 const SYSTEM = `You are an independent auditor scoring several AI runs of the same task on the same business data.
 
-Step 1 — Ground truth. If an ANSWER KEY is given, the ground-truth issues are exactly the issues in the key.
+Step 1 — Ground truth. If an ANSWER KEY is given, the ground-truth items are exactly the lines of the key
+(issues to catch, or requirements a good output must meet).
 Otherwise, audit the DATA yourself (against the REFERENCE if given) and list every real exception the task asks to find.
 Include only issues you can point to in the data. Give each an id "I1", "I2", ...
 
 Step 2 — For each option, read its result items and decide:
-- found: ids of ground-truth issues the option clearly identified (same row/invoice and same problem). Partial or vague mentions do not count.
-- false_flags: items the option flagged as a problem that are not real issues in the data.
+- found: ids of ground-truth items the option clearly got right (the same record and the same problem, or the requirement
+  clearly met). Partial or vague mentions do not count.
+- false_flags: items where the option flagged a problem that is not real, or asserted something wrong about the data.
 - unsupported: number of items stating facts or numbers that do not appear in or follow from the data.
 - verdict: one plain sentence on how the option did.
 

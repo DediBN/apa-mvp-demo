@@ -5,7 +5,7 @@ import { APAStatus } from "../../lib/state-machine";
 import { AJD } from "../../lib/intake-agent/mock";
 import { Candidate } from "../../lib/research-agent/mock";
 import { CandidateEvaluationResult } from "../../lib/evaluation-agent/mock";
-import type { JudgeResponse, OptionScore } from "../../lib/skills/types";
+import type { GeneratedScenario, JudgeResponse, OptionScore } from "../../lib/skills/types";
 import { buildZip, skillFolderName } from "../../lib/skills/zip";
 import { StatusPill } from "../ui/status-pill";
 
@@ -107,7 +107,9 @@ export function SkillEvaluationCenter({ status, ajd, candidates, onEvaluationDon
   const [referenceData, setReferenceData] = useState("");
   const [answerKey, setAnswerKey] = useState("");
   const [authorCustom, setAuthorCustom] = useState(true);
-  const [stage, setStage] = useState<"input" | "running" | "judging" | "done">("input");
+  const [mode, setMode] = useState<"scenarios" | "data">("scenarios");
+  const [scenarios, setScenarios] = useState<GeneratedScenario[]>([]);
+  const [stage, setStage] = useState<"input" | "generating" | "running" | "judging" | "done">("input");
   const [lanes, setLanes] = useState<Lane[]>([]);
   const [judge, setJudge] = useState<JudgeResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -140,81 +142,195 @@ export function SkillEvaluationCenter({ status, ajd, candidates, onEvaluationDon
 
   async function runEvaluation() {
     if (!ajd) return;
-    if (!customerData.trim()) {
-      setError("Upload or paste at least one real data sample.");
+    if (mode === "data" && !customerData.trim()) {
+      setError("Upload or paste at least one real data sample, or switch to generated scenarios.");
       return;
     }
     setError(null);
     setJudge(null);
-    setStage("running");
+    setOpenKey(null);
     setLanes(plannedLanes);
-    addLog(`Skill evaluation started: ${plannedLanes.length} options on the same real data.`);
 
     const actionDescription = buildActionDescription(ajd);
+    const ajdBody = {
+      job_title: ajd.job_title,
+      business_need: ajd.business_need,
+      mission: ajd.agent_profile?.mission,
+      kpis: ajd.agent_profile?.kpis
+    };
 
-    const finished = await Promise.all(
-      plannedLanes.map(async (lane): Promise<Lane> => {
-        const id = lane.candidate.candidate_id;
-        let skillMd = lane.kind === "baseline" ? undefined : lane.skillMd;
-        try {
-          if (lane.kind === "custom") {
-            updateLane(id, { state: "authoring" });
-            const authored = await postJson<{ skill_md: string; name: string }>("/api/skills/author", {
-              job_title: ajd.job_title,
-              business_need: ajd.business_need,
-              mission: ajd.agent_profile?.mission,
-              kpis: ajd.agent_profile?.kpis
-            });
-            skillMd = authored.skill_md;
-            updateLane(id, { skillMd });
-            addLog(`Custom skill authored from the AJD: ${authored.name}`);
-          }
-          updateLane(id, { state: "running" });
-          const result = await postJson<RunResult>("/api/concierge-demo", {
-            action_description: actionDescription,
-            customer_data: customerData.slice(0, MAX_CHARS),
-            reference_data: referenceData.slice(0, MAX_CHARS),
-            skill_md: skillMd,
-            skill_name: lane.kind === "baseline" ? undefined : lane.candidate.name
-          });
-          updateLane(id, { state: "done", result });
-          return { ...lane, skillMd, state: "done", result };
-        } catch (e) {
-          const message = e instanceof Error ? e.message : "Run failed";
-          updateLane(id, { state: "error", error: message });
-          addLog(`Run failed for ${lane.candidate.name}: ${message}`);
-          return { ...lane, skillMd, state: "error", error: message };
+    // 1. Test sets: the user's data, or scenarios generated from the AJD (generator never sees any skill).
+    let sets: Array<{ id: string; label: string; customer: string; reference: string; answerKey?: string }>;
+    if (mode === "data") {
+      sets = [{ id: "D", label: "Your data", customer: customerData, reference: referenceData, answerKey: answerKey.trim() || undefined }];
+    } else {
+      setStage("generating");
+      addLog("Generating test scenarios from the AJD (no real data provided).");
+      try {
+        // Two independent calls in parallel (standard + hard) keep each request well inside the function time limit.
+        const settled = await Promise.allSettled(
+          (["standard", "hard"] as const).map((variant) =>
+            postJson<{ scenarios: GeneratedScenario[] }>("/api/skills/scenarios", { ...ajdBody, count: 1, variant })
+          )
+        );
+        const generated = {
+          scenarios: settled.flatMap((r) => (r.status === "fulfilled" ? r.value.scenarios : []))
+        };
+        if (generated.scenarios.length === 0) {
+          throw new Error("Could not generate test scenarios. Please try again.");
         }
-      })
+        setScenarios(generated.scenarios);
+        sets = generated.scenarios.map((sc, i) => ({
+          id: `S${i + 1}`,
+          label: sc.title,
+          customer: sc.customer_data,
+          reference: sc.reference_data,
+          answerKey: sc.answer_key
+        }));
+        addLog(`Scenarios ready: ${generated.scenarios.map((sc) => sc.title).join(" · ")}`);
+      } catch (e) {
+        setError(e instanceof Error ? e.message : "Could not generate scenarios.");
+        setStage("input");
+        return;
+      }
+    }
+
+    setStage("running");
+    addLog(`Skill evaluation: ${plannedLanes.length} options × ${sets.length} test set${sets.length === 1 ? "" : "s"}.`);
+
+    // 2. Author the custom skill once, before any run.
+    const skillByLane = new Map<string, string | undefined>();
+    for (const lane of plannedLanes) {
+      skillByLane.set(lane.candidate.candidate_id, lane.kind === "baseline" ? undefined : lane.skillMd);
+    }
+    const customLane = plannedLanes.find((lane) => lane.kind === "custom");
+    if (customLane) {
+      const id = customLane.candidate.candidate_id;
+      updateLane(id, { state: "authoring" });
+      try {
+        const authored = await postJson<{ skill_md: string; name: string }>("/api/skills/author", ajdBody);
+        skillByLane.set(id, authored.skill_md);
+        updateLane(id, { skillMd: authored.skill_md, state: "queued" });
+        addLog(`Custom skill authored from the AJD: ${authored.name}`);
+      } catch (e) {
+        updateLane(id, { state: "error", error: e instanceof Error ? e.message : "Authoring failed" });
+      }
+    }
+
+    // 3. Every runnable option × every test set, in parallel.
+    const runnable = plannedLanes.filter((lane) => lane.kind !== "custom" || skillByLane.get(lane.candidate.candidate_id));
+    runnable.forEach((lane) => updateLane(lane.candidate.candidate_id, { state: "running" }));
+    const runs = await Promise.all(
+      runnable.flatMap((lane) =>
+        sets.map(async (set) => {
+          try {
+            const result = await postJson<RunResult>("/api/concierge-demo", {
+              action_description: actionDescription,
+              customer_data: set.customer.slice(0, MAX_CHARS),
+              reference_data: set.reference.slice(0, MAX_CHARS),
+              skill_md: skillByLane.get(lane.candidate.candidate_id),
+              skill_name: lane.kind === "baseline" ? undefined : lane.candidate.name
+            });
+            return { laneId: lane.candidate.candidate_id, setId: set.id, result };
+          } catch (e) {
+            return { laneId: lane.candidate.candidate_id, setId: set.id, error: e instanceof Error ? e.message : "Run failed" };
+          }
+        })
+      )
     );
 
-    const completed = finished.filter((lane) => lane.result);
-    if (completed.length === 0) {
-      setError("None of the runs completed. Try a shorter sample and run again.");
+    const finished: Lane[] = plannedLanes.map((lane) => {
+      const id = lane.candidate.candidate_id;
+      const mine = runs.filter((r) => r.laneId === id);
+      const ok = mine.filter((r) => r.result);
+      const skillMd = skillByLane.get(id) ?? lane.skillMd;
+      if (ok.length === 0) {
+        const message = mine.find((r) => r.error)?.error || "Not run";
+        updateLane(id, { state: "error", error: message, skillMd });
+        return { ...lane, skillMd, state: "error", error: message };
+      }
+      const merged: RunResult = {
+        summary: ok.map((r) => `${sets.length > 1 ? `[${r.setId}] ` : ""}${r.result?.summary ?? ""}`).join("\n"),
+        items: ok.flatMap((r) => (r.result?.items ?? []).map((it) => (sets.length > 1 ? { ...it, label: `[${r.setId}] ${it.label}` } : it)))
+      };
+      updateLane(id, { state: "done", result: merged, skillMd });
+      return { ...lane, skillMd, state: "done", result: merged };
+    });
+
+    if (!runs.some((r) => r.result)) {
+      setError("None of the runs completed. Try again.");
       setStage("input");
       return;
     }
 
+    // 4. Judge each test set against its own ground truth, then aggregate counts across sets.
     setStage("judging");
-    addLog("All runs finished. Scoring every output against one ground truth.");
+    addLog("All runs finished. Scoring every output against one ground truth per test set.");
     try {
-      const judged = await postJson<JudgeResponse>("/api/skills/judge", {
-        action_description: actionDescription,
-        customer_data: customerData.slice(0, MAX_CHARS),
-        reference_data: referenceData.slice(0, MAX_CHARS),
-        answer_key: answerKey.trim() || undefined,
-        outputs: completed.map((lane) => ({
-          key: lane.candidate.candidate_id,
-          name: lane.candidate.name,
-          summary: lane.result?.summary,
-          items: lane.result?.items ?? []
-        }))
-      });
-      setJudge(judged);
+      const judgedSets = await Promise.all(
+        sets.map(async (set) => {
+          const outputs = runs
+            .filter((r) => r.setId === set.id && r.result)
+            .map((r) => {
+              const lane = plannedLanes.find((l) => l.candidate.candidate_id === r.laneId)!;
+              return { key: r.laneId, name: lane.candidate.name, summary: r.result?.summary, items: r.result?.items ?? [] };
+            });
+          const judged = await postJson<JudgeResponse>("/api/skills/judge", {
+            action_description: actionDescription,
+            customer_data: set.customer.slice(0, MAX_CHARS),
+            reference_data: set.reference.slice(0, MAX_CHARS),
+            answer_key: set.answerKey,
+            outputs
+          });
+          return { set, judged };
+        })
+      );
+
+      const multi = sets.length > 1;
+      const prefix = (setId: string, id: string) => (multi ? `${setId}·${id}` : id);
+      const issues = judgedSets.flatMap(({ set, judged }) =>
+        judged.issues.map((issue) => ({ id: prefix(set.id, issue.id), description: multi ? `[${set.id}] ${issue.description}` : issue.description }))
+      );
+      const pct = (n: number) => Math.max(0, Math.min(100, Math.round(n * 100)));
+      const scores: OptionScore[] = finished
+        .filter((lane) => lane.result)
+        .map((lane) => {
+          const per = judgedSets
+            .map(({ set, judged }) => ({ set, score: judged.scores.find((sc) => sc.key === lane.candidate.candidate_id) }))
+            .filter((x): x is { set: typeof x.set; score: OptionScore } => Boolean(x.score));
+          const found = per.flatMap(({ set, score }) => score.found.map((id) => prefix(set.id, id)));
+          const missed = issues.map((i) => i.id).filter((id) => !found.includes(id));
+          const falseFlags = per.flatMap(({ set, score }) => score.false_flags.map((f) => ({ ...f, item: multi ? `[${set.id}] ${f.item}` : f.item })));
+          const unsupported = per.reduce((sum, { score }) => sum + score.unsupported, 0);
+          const totalItems = per.reduce((sum, { score }) => sum + score.total_items, 0);
+          const recall = issues.length ? found.length / issues.length : 0;
+          const flagged = found.length + falseFlags.length;
+          const precision = flagged ? found.length / flagged : 0;
+          const grounding = totalItems ? 1 - unsupported / totalItems : 0;
+          return {
+            key: lane.candidate.candidate_id,
+            name: lane.candidate.name,
+            found,
+            missed,
+            false_flags: falseFlags,
+            unsupported,
+            total_items: totalItems,
+            recall: pct(recall),
+            precision: pct(precision),
+            grounding: pct(grounding),
+            composite: pct(recall * 0.6 + precision * 0.3 + grounding * 0.1),
+            verdict: per.map(({ set, score }) => `${multi ? `[${set.id}] ` : ""}${score.verdict}`).join(" ")
+          };
+        });
+
+      const groundTruth: JudgeResponse["ground_truth"] =
+        mode === "scenarios" ? "generated_scenarios" : answerKey.trim() ? "answer_key" : "independent_audit";
+      const aggregated: JudgeResponse = { ground_truth: groundTruth, issues, scores };
+      setJudge(aggregated);
       setStage("done");
-      const ranked = [...judged.scores].sort((a, b) => b.composite - a.composite);
-      addLog(`Scoring done (${judged.ground_truth === "answer_key" ? "answer key" : "independent audit"}). Top: ${ranked[0]?.name} · ${ranked[0]?.composite}`);
-      onEvaluationDone(finished.map((lane) => toEvaluationResult(lane, judged.scores.find((s) => s.key === lane.candidate.candidate_id))));
+      const ranked = [...scores].sort((a, b) => b.composite - a.composite);
+      addLog(`Scoring done. Top: ${ranked[0]?.name} · ${ranked[0]?.composite}`);
+      onEvaluationDone(finished.map((lane) => toEvaluationResult(lane, scores.find((sc) => sc.key === lane.candidate.candidate_id))));
     } catch (e) {
       setError(e instanceof Error ? e.message : "Scoring failed.");
       setStage("input");
@@ -258,71 +374,107 @@ export function SkillEvaluationCenter({ status, ajd, candidates, onEvaluationDon
           <p className="mt-1 text-lg font-semibold text-command-text">Every option runs the real task on your real data</p>
         </div>
         <StatusPill
-          label={stage === "done" ? "COMPLETE" : stage === "judging" ? "SCORING" : stage === "running" ? "RUNNING" : "AWAITING DATA"}
+          label={stage === "done" ? "COMPLETE" : stage === "judging" ? "SCORING" : stage === "running" ? "RUNNING" : stage === "generating" ? "BUILDING TESTS" : "READY"}
           tone={stage === "done" ? "pass" : stage === "input" ? "neutral" : "action"}
         />
       </header>
 
       {stage === "input" && (
-        <div className="grid gap-4 lg:grid-cols-2">
-          <div className="command-card space-y-3 p-4">
-            <p className="font-mono text-xs uppercase tracking-[0.14em] text-command-muted">Real data</p>
-            <textarea
-              rows={6}
-              value={customerData}
-              onChange={(e) => setCustomerData(e.target.value)}
-              placeholder="Paste records, or upload a .csv / .txt file"
-              className="w-full rounded border border-command-border bg-command-bg p-2 font-mono text-xs text-command-text"
-            />
-            <input type="file" accept=".txt,.csv,.md" onChange={(e) => e.target.files?.[0] && readFile(e.target.files[0], setCustomerData)} className="text-xs text-command-muted" />
-
-            <p className="pt-2 font-mono text-xs uppercase tracking-[0.14em] text-command-muted">Reference (optional) — price list, catalog, policy</p>
-            <textarea
-              rows={3}
-              value={referenceData}
-              onChange={(e) => setReferenceData(e.target.value)}
-              className="w-full rounded border border-command-border bg-command-bg p-2 font-mono text-xs text-command-text"
-            />
-            <input type="file" accept=".txt,.csv,.md" onChange={(e) => e.target.files?.[0] && readFile(e.target.files[0], setReferenceData)} className="text-xs text-command-muted" />
-          </div>
-
-          <div className="command-card space-y-3 p-4">
-            <p className="font-mono text-xs uppercase tracking-[0.14em] text-command-muted">Answer key (optional, for testing)</p>
-            <p className="text-xs text-command-muted">
-              The issues you know are in the data. With a key, scores are measured against it. Without one, the judge audits the data
-              independently — treat those scores as indicative.
-            </p>
-            <textarea
-              rows={4}
-              value={answerKey}
-              onChange={(e) => setAnswerKey(e.target.value)}
-              className="w-full rounded border border-command-border bg-command-bg p-2 font-mono text-xs text-command-text"
-            />
-            <input type="file" accept=".txt,.csv,.md" onChange={(e) => e.target.files?.[0] && readFile(e.target.files[0], setAnswerKey)} className="text-xs text-command-muted" />
-
-            <label className="flex items-center gap-2 pt-2 text-sm text-command-text">
-              <input type="checkbox" checked={authorCustom} onChange={(e) => setAuthorCustom(e.target.checked)} />
-              Author a custom skill from the AJD and include it
-            </label>
-
-            <div className="rounded border border-command-border/60 p-2 font-mono text-[11px] text-command-muted">
-              Options to run ({plannedLanes.length}):
-              {plannedLanes.map((lane) => (
-                <div key={lane.candidate.candidate_id}>· {lane.candidate.name}</div>
-              ))}
-            </div>
-
-            {error && <p className="text-sm text-red-400">{error}</p>}
-
+        <div className="space-y-4">
+          <div className="inline-flex rounded-lg border border-command-border p-1 font-mono text-xs">
             <button
               type="button"
-              onClick={runEvaluation}
-              className="w-full rounded-lg border border-command-action bg-command-action py-2.5 font-mono text-sm font-semibold text-command-bg transition hover:brightness-110"
+              onClick={() => setMode("scenarios")}
+              className={`rounded px-3 py-1.5 ${mode === "scenarios" ? "bg-command-action text-command-bg" : "text-command-muted hover:text-command-text"}`}
             >
-              ▶ Run all options on this data
+              No data — generate test scenarios
+            </button>
+            <button
+              type="button"
+              onClick={() => setMode("data")}
+              className={`rounded px-3 py-1.5 ${mode === "data" ? "bg-command-action text-command-bg" : "text-command-muted hover:text-command-text"}`}
+            >
+              Test on my real data
             </button>
           </div>
+
+          <div className="grid gap-4 lg:grid-cols-2">
+            {mode === "scenarios" ? (
+              <div className="command-card space-y-2 p-4">
+                <p className="font-mono text-xs uppercase tracking-[0.14em] text-command-muted">Generated scenarios</p>
+                <p className="text-sm text-command-text">
+                  We write 2 realistic test cases from the job description — sample data with known answers, clean records, a false-alarm trap
+                  and an easy-to-miss case. Every option runs on both and is scored against those answers.
+                </p>
+                <p className="text-xs text-command-muted">
+                  The scenario writer never sees any skill. Results are synthetic: they show which skill is most likely to help, not proof on
+                  your data. The custom skill and the scenarios both come from the job description, so its lead may be overstated.
+                </p>
+              </div>
+            ) : (
+              <div className="command-card space-y-3 p-4">
+                <p className="font-mono text-xs uppercase tracking-[0.14em] text-command-muted">Real data</p>
+                <textarea
+                  rows={6}
+                  value={customerData}
+                  onChange={(e) => setCustomerData(e.target.value)}
+                  placeholder="Paste records, or upload a .csv / .txt file"
+                  className="w-full rounded border border-command-border bg-command-bg p-2 font-mono text-xs text-command-text"
+                />
+                <input type="file" accept=".txt,.csv,.md" onChange={(e) => e.target.files?.[0] && readFile(e.target.files[0], setCustomerData)} className="text-xs text-command-muted" />
+
+                <p className="pt-2 font-mono text-xs uppercase tracking-[0.14em] text-command-muted">Reference (optional) — price list, catalog, policy</p>
+                <textarea
+                  rows={3}
+                  value={referenceData}
+                  onChange={(e) => setReferenceData(e.target.value)}
+                  className="w-full rounded border border-command-border bg-command-bg p-2 font-mono text-xs text-command-text"
+                />
+                <input type="file" accept=".txt,.csv,.md" onChange={(e) => e.target.files?.[0] && readFile(e.target.files[0], setReferenceData)} className="text-xs text-command-muted" />
+
+                <p className="pt-2 font-mono text-xs uppercase tracking-[0.14em] text-command-muted">Answer key (optional, for testing)</p>
+                <p className="text-xs text-command-muted">
+                  What you know is in the data. With a key, scores are measured against it; without one, the judge audits the data independently.
+                </p>
+                <textarea
+                  rows={3}
+                  value={answerKey}
+                  onChange={(e) => setAnswerKey(e.target.value)}
+                  className="w-full rounded border border-command-border bg-command-bg p-2 font-mono text-xs text-command-text"
+                />
+                <input type="file" accept=".txt,.csv,.md" onChange={(e) => e.target.files?.[0] && readFile(e.target.files[0], setAnswerKey)} className="text-xs text-command-muted" />
+              </div>
+            )}
+
+            <div className="command-card space-y-3 p-4">
+              <label className="flex items-center gap-2 text-sm text-command-text">
+                <input type="checkbox" checked={authorCustom} onChange={(e) => setAuthorCustom(e.target.checked)} />
+                Author a custom skill from the AJD and include it
+              </label>
+
+              <div className="rounded border border-command-border/60 p-2 font-mono text-[11px] text-command-muted">
+                Options to run ({plannedLanes.length}):
+                {plannedLanes.map((lane) => (
+                  <div key={lane.candidate.candidate_id}>· {lane.candidate.name}</div>
+                ))}
+              </div>
+
+              {error && <p className="text-sm text-red-400">{error}</p>}
+
+              <button
+                type="button"
+                onClick={runEvaluation}
+                className="w-full rounded-lg border border-command-action bg-command-action py-2.5 font-mono text-sm font-semibold text-command-bg transition hover:brightness-110"
+              >
+                {mode === "scenarios" ? "▶ Build tests and run all options" : "▶ Run all options on this data"}
+              </button>
+            </div>
+          </div>
         </div>
+      )}
+
+      {stage === "generating" && (
+        <p className="font-mono text-xs text-command-action">Writing test scenarios from the job description — realistic sample data with known answers…</p>
       )}
 
       {(stage === "running" || stage === "judging") && (
@@ -361,9 +513,34 @@ export function SkillEvaluationCenter({ status, ajd, candidates, onEvaluationDon
               </p>
             )}
             <p className="mt-1 font-mono text-[11px] text-command-muted">
-              Ground truth: {judge.ground_truth === "answer_key" ? "your answer key" : "independent audit of the data (indicative)"} · {judge.issues.length} issues
+              Ground truth: {judge.ground_truth === "answer_key"
+                ? "your answer key"
+                : judge.ground_truth === "generated_scenarios"
+                  ? `${scenarios.length} generated scenarios with planted answer keys (synthetic — confirm on real data before relying on it)`
+                  : "independent audit of the data (indicative)"} · {judge.issues.length} issues
             </p>
           </div>
+
+          {judge.ground_truth === "generated_scenarios" && scenarios.length > 0 && (
+            <details className="command-card p-3">
+              <summary className="cursor-pointer font-mono text-[11px] uppercase tracking-[0.14em] text-command-muted">
+                Test scenarios used ({scenarios.length})
+              </summary>
+              <div className="mt-2 space-y-3">
+                {scenarios.map((sc, i) => (
+                  <div key={i}>
+                    <p className="text-sm font-semibold text-command-text">S{i + 1} · {sc.title}</p>
+                    <pre className="mt-1 max-h-40 overflow-auto whitespace-pre-wrap rounded border border-command-border bg-command-bg p-2 text-[11px] text-command-text">{sc.customer_data}</pre>
+                    {sc.reference_data ? (
+                      <pre className="mt-1 max-h-24 overflow-auto whitespace-pre-wrap rounded border border-command-border bg-command-bg p-2 text-[11px] text-command-muted">{sc.reference_data}</pre>
+                    ) : null}
+                    <p className="mt-1 font-mono text-[10px] uppercase tracking-[0.12em] text-command-muted">Answer key</p>
+                    <pre className="whitespace-pre-wrap text-[11px] text-command-muted">{sc.answer_key}</pre>
+                  </div>
+                ))}
+              </div>
+            </details>
+          )}
 
           <div className="overflow-x-auto">
             <table className="w-full min-w-[620px] border-collapse font-mono text-xs">
@@ -474,7 +651,7 @@ export function SkillEvaluationCenter({ status, ajd, candidates, onEvaluationDon
               }}
               className="rounded-lg border border-command-border px-5 py-2.5 font-mono text-sm text-command-muted transition hover:text-command-text"
             >
-              ▶ Run again on other data
+              ▶ Run again
             </button>
             {winnerBeatsBaseline && winnerLane?.skillMd ? (
               <button
