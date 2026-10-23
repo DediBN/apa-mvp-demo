@@ -96,7 +96,7 @@ function customSkillCandidate(jobTitle: string): Candidate {
     name: `Custom skill: ${jobTitle}`,
     source: "Custom Skill",
     fit_score_pre_eval: 70,
-    reason_codes: ["Authored from the approved AJD — fits the process exactly", "Fallback when no directory skill passes screening"],
+    reason_codes: ["Written from the approved Skill Spec — fits the process exactly", "Fallback when no directory skill passes screening"],
     risk_flags: ["Not yet written — must be authored and tested before deployment"],
     skill: { directory: "Custom", author: "APA" }
   };
@@ -200,7 +200,7 @@ export async function POST(request: Request) {
             name: hit.name,
             source: hit.directory,
             fit_score_pre_eval: Math.max(0, Math.min(100, Math.round(verdict?.fit_score ?? 0))),
-            reason_codes: [verdict?.fit_reason || hit.description || "Matched the AJD", popularityLine || `by ${hit.author || "unknown"}`],
+            reason_codes: [verdict?.fit_reason || hit.description || "Matched the Skill Spec", popularityLine || `by ${hit.author || "unknown"}`],
             risk_flags: [
               ...((verdict?.fit_score ?? 0) < MIN_FIT ? ["Below screening threshold — weak fit, shown for comparison only"] : []),
               ...(verdict?.gaps ? [`Gap: ${verdict.gaps}`] : []),

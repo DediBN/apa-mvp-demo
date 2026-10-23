@@ -114,6 +114,7 @@ export function SkillEvaluationCenter({ status, ajd, candidates, onEvaluationDon
   const [judge, setJudge] = useState<JudgeResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [openKey, setOpenKey] = useState<string | null>(null);
+  const [showInstall, setShowInstall] = useState(false);
 
   const visible = status.state === "EVALUATING" || status.state === "COMPLETE" || status.state === "SCORECARD";
 
@@ -165,7 +166,7 @@ export function SkillEvaluationCenter({ status, ajd, candidates, onEvaluationDon
       sets = [{ id: "D", label: "Your data", customer: customerData, reference: referenceData, answerKey: answerKey.trim() || undefined }];
     } else {
       setStage("generating");
-      addLog("Generating test scenarios from the AJD (no real data provided).");
+      addLog("Generating test scenarios from the Skill Spec (no real data provided).");
       try {
         // Two independent calls in parallel (standard + hard) keep each request well inside the function time limit.
         const settled = await Promise.allSettled(
@@ -211,7 +212,7 @@ export function SkillEvaluationCenter({ status, ajd, candidates, onEvaluationDon
         const authored = await postJson<{ skill_md: string; name: string }>("/api/skills/author", ajdBody);
         skillByLane.set(id, authored.skill_md);
         updateLane(id, { skillMd: authored.skill_md, state: "queued" });
-        addLog(`Custom skill authored from the AJD: ${authored.name}`);
+        addLog(`Custom skill written from the Skill Spec: ${authored.name}`);
       } catch (e) {
         updateLane(id, { state: "error", error: e instanceof Error ? e.message : "Authoring failed" });
       }
@@ -340,14 +341,19 @@ export function SkillEvaluationCenter({ status, ajd, candidates, onEvaluationDon
   function downloadSkill(lane: Lane) {
     if (!lane.skillMd) return;
     const folder = skillFolderName(lane.skillMd, lane.candidate.name);
-    const blob = buildZip([{ path: `${folder}/SKILL.md`, content: lane.skillMd }]);
+    // Claude rejects uploads whose folder name doesn't match the skill's frontmatter name, so align them.
+    const content = /^---[\s\S]*?^name:/m.test(lane.skillMd)
+      ? lane.skillMd.replace(/^name:.*$/m, `name: ${folder}`)
+      : `---\nname: ${folder}\ndescription: ${lane.candidate.name}\n---\n\n${lane.skillMd}`;
+    const blob = buildZip([{ path: `${folder}/SKILL.md`, content }]);
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = url;
     a.download = `${folder}.zip`;
     a.click();
     URL.revokeObjectURL(url);
-    addLog(`Downloaded ${folder}.zip — upload it to Claude as a skill.`);
+    addLog(`Downloaded ${folder}.zip — see "Install in Claude" for the steps.`);
+    setShowInstall(true);
   }
 
   if (!visible || !ajd) {
@@ -403,12 +409,12 @@ export function SkillEvaluationCenter({ status, ajd, candidates, onEvaluationDon
               <div className="command-card space-y-2 p-4">
                 <p className="font-mono text-xs uppercase tracking-[0.14em] text-command-muted">Generated scenarios</p>
                 <p className="text-sm text-command-text">
-                  We write 2 realistic test cases from the job description — sample data with known answers, clean records, a false-alarm trap
+                  We write 2 realistic test cases from the Skill Spec — sample data with known answers, clean records, a false-alarm trap
                   and an easy-to-miss case. Every option runs on both and is scored against those answers.
                 </p>
                 <p className="text-xs text-command-muted">
                   The scenario writer never sees any skill. Results are synthetic: they show which skill is most likely to help, not proof on
-                  your data. The custom skill and the scenarios both come from the job description, so its lead may be overstated.
+                  your data. The custom skill and the scenarios both come from the Skill Spec, so its lead may be overstated.
                 </p>
               </div>
             ) : (
@@ -449,7 +455,7 @@ export function SkillEvaluationCenter({ status, ajd, candidates, onEvaluationDon
             <div className="command-card space-y-3 p-4">
               <label className="flex items-center gap-2 text-sm text-command-text">
                 <input type="checkbox" checked={authorCustom} onChange={(e) => setAuthorCustom(e.target.checked)} />
-                Author a custom skill from the AJD and include it
+                Write a custom skill from the Skill Spec and include it
               </label>
 
               <div className="rounded border border-command-border/60 p-2 font-mono text-[11px] text-command-muted">
@@ -474,7 +480,7 @@ export function SkillEvaluationCenter({ status, ajd, candidates, onEvaluationDon
       )}
 
       {stage === "generating" && (
-        <p className="font-mono text-xs text-command-action">Writing test scenarios from the job description — realistic sample data with known answers…</p>
+        <p className="font-mono text-xs text-command-action">Writing test scenarios from the Skill Spec — realistic sample data with known answers…</p>
       )}
 
       {(stage === "running" || stage === "judging") && (
@@ -668,8 +674,78 @@ export function SkillEvaluationCenter({ status, ajd, candidates, onEvaluationDon
               Only SKILL.md is packaged. Any scripts in the original repository are not included and were not run.
             </p>
           ) : null}
+
+          <div className="command-card p-4">
+            <button
+              type="button"
+              onClick={() => setShowInstall((v) => !v)}
+              className="flex w-full items-center justify-between font-mono text-xs uppercase tracking-[0.14em] text-command-action"
+            >
+              <span>Install in Claude — step by step</span>
+              <span>{showInstall ? "−" : "+"}</span>
+            </button>
+            {showInstall && <InstallGuide />}
+          </div>
         </div>
       )}
     </section>
+  );
+}
+
+function InstallGuide() {
+  return (
+    <div className="mt-3 space-y-4 text-sm text-command-text">
+      <div>
+        <p className="font-mono text-[11px] uppercase tracking-[0.14em] text-command-muted">1 · Turn on code execution (one time)</p>
+        <ul className="mt-1 list-disc space-y-1 pl-5 text-command-muted">
+          <li>
+            <span className="text-command-text">Free, Pro, Max:</span> Settings → Capabilities → turn on “Code execution and file creation”.
+          </li>
+          <li>
+            <span className="text-command-text">Team:</span> already on by default.
+          </li>
+          <li>
+            <span className="text-command-text">Enterprise:</span> an owner turns on “Code execution and file creation” and “Skills” in Organization
+            settings → Plugins &amp; skills → Policy.
+          </li>
+        </ul>
+      </div>
+      <div>
+        <p className="font-mono text-[11px] uppercase tracking-[0.14em] text-command-muted">2 · Upload the skill</p>
+        <ol className="mt-1 list-decimal space-y-1 pl-5 text-command-muted">
+          <li>In Claude, go to Customize → Skills.</li>
+          <li>Click “+”, then “+ Create skill”, then “Upload a skill”.</li>
+          <li>Choose the .zip you downloaded here — upload it as is, don’t unzip it.</li>
+          <li>The skill appears in your list. Make sure its toggle is on.</li>
+        </ol>
+      </div>
+      <div>
+        <p className="font-mono text-[11px] uppercase tracking-[0.14em] text-command-muted">3 · Use it</p>
+        <p className="mt-1 text-command-muted">
+          Claude uses the skill on its own when a request fits it. If it doesn’t, name the skill in your message. Uploaded skills are private to you
+          until you share them.
+        </p>
+      </div>
+      <div>
+        <p className="font-mono text-[11px] uppercase tracking-[0.14em] text-command-muted">For a whole team (Team / Enterprise owners)</p>
+        <p className="mt-1 text-command-muted">
+          Organization settings → Plugins &amp; skills → Add → Upload a skill. It is provisioned to everyone at once; each person can still turn it off.
+        </p>
+      </div>
+      <div>
+        <p className="font-mono text-[11px] uppercase tracking-[0.14em] text-command-muted">Claude Code</p>
+        <p className="mt-1 text-command-muted">
+          Nothing extra: skills in your Claude account sync to Claude Code when you sign in with the same account. Run /skills to see them.
+        </p>
+      </div>
+      <a
+        href="https://support.claude.com/en/articles/12512180-use-skills-in-claude"
+        target="_blank"
+        rel="noreferrer"
+        className="inline-block font-mono text-[11px] uppercase tracking-[0.14em] text-command-action hover:underline"
+      >
+        Official guide: Use skills in Claude ↗
+      </a>
+    </div>
   );
 }

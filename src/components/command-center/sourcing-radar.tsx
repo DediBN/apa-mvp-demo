@@ -26,7 +26,7 @@ function buildLocalFallbackCandidates(ajd: AJD): Candidate[] {
       name: `Custom skill: ${ajd.job_title}`,
       source: "Custom Skill",
       fit_score_pre_eval: 70,
-      reason_codes: ["Authored from the approved AJD", "Used while directory search is unavailable"],
+      reason_codes: ["Written from the approved Skill Spec", "Used while directory search is unavailable"],
       risk_flags: ["Not yet written — must be authored and tested before deployment"],
       skill: { directory: "Custom", author: "APA" }
     },
@@ -113,7 +113,7 @@ export function SourcingRadar({ status, ajd, onShortlistReady, onFail, addLog }:
     setShortlist(fallbackCandidates);
     addLog("Sourcing Radar activated. Scanning skill directories: SkillsMP, skills.sh.");
 
-    const jobTitle = readyAjd.job_title?.trim() || `${readyAjd.domain} Automation Agent`;
+    const jobTitle = readyAjd.job_title?.trim() || `${readyAjd.domain} Skill`;
     const mission = readyAjd.agent_profile?.mission?.trim() || readyAjd.business_need?.trim() || "Automate core workflows with safe escalation controls";
     addLog(`Radar input prepared: title='${jobTitle}', mission='${mission.slice(0, 48)}...'`);
     const startTime = Date.now();
@@ -161,7 +161,7 @@ export function SourcingRadar({ status, ajd, onShortlistReady, onFail, addLog }:
           const normalizedCandidates = result.slice(0, 5);
           setVisibleCount(0);
           setShortlist(normalizedCandidates);
-          addLog(`Shortlist upgraded from API: ${normalizedCandidates.length} candidates matched to AJD.`);
+          addLog(`Shortlist upgraded from API: ${normalizedCandidates.length} skills matched to the Skill Spec.`);
         }
       })
       .catch((error) => {

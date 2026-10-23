@@ -67,7 +67,7 @@ export function StateMachinePanel() {
         <div className="command-card p-4">
           <p className="font-mono text-xs uppercase tracking-[0.18em] text-command-muted">Artifacts</p>
           <ul className="mt-3 space-y-2 text-sm text-command-text">
-            <li>AJD generated: {String(status.context.artifacts.ajdGenerated)}</li>
+            <li>Skill Spec generated: {String(status.context.artifacts.ajdGenerated)}</li>
             <li>Candidates: {status.context.artifacts.candidateCount}</li>
             <li>Evaluations persisted: {String(status.context.artifacts.evaluationsPersisted)}</li>
             <li>Scorecard generated: {String(status.context.artifacts.scorecardGenerated)}</li>

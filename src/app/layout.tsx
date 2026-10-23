@@ -3,7 +3,7 @@ import "./globals.css";
 
 export const metadata: Metadata = {
   title: "APA Command Center",
-  description: "APA MVP Meta-Agent orchestration demo"
+  description: "APA skill acquisition demo — find, test and install Claude skills"
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {

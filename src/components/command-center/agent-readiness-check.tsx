@@ -91,7 +91,7 @@ export function AgentReadinessCheck({ ajd, onClose, candidates }: AgentReadiness
       : "";
 
     const actionDescription = [
-      `Agent title: ${ajd.job_title}`,
+      `Skill: ${ajd.job_title}`,
       `Business need: ${ajd.business_need}`,
       ajd.agent_profile?.mission ? `Mission: ${ajd.agent_profile.mission}` : "",
       kpiLines ? `Target KPIs: ${kpiLines}` : "",
@@ -161,7 +161,7 @@ export function AgentReadinessCheck({ ajd, onClose, candidates }: AgentReadiness
       }
       const data = await res.json();
       if (!data || !Array.isArray(data.items)) {
-        throw new Error("The agent couldn't produce a readable result from this data. Try a shorter or clearer sample.");
+        throw new Error("The skill couldn't produce a readable result from this data. Try a shorter or clearer sample.");
       }
       setResult(data);
       setStage("done");
@@ -194,11 +194,11 @@ export function AgentReadinessCheck({ ajd, onClose, candidates }: AgentReadiness
           <p className="font-mono text-sm text-command-text">
             {skillMode
               ? `Test ${runnableSkills.length} shortlisted skill${runnableSkills.length === 1 ? "" : "s"} against Claude with no skill, on your own data?`
-              : "Want to test this agent on your own real data?"}
+              : "Want to test this skill on your own real data?"}
           </p>
           <p className="mt-2 text-sm text-command-muted">
             No connection to any of your systems — you paste or upload a real
-            example, we run this exact agent on it, and show you what it got
+            example, we run this exact skill on it, and show you what it got
             right and where it needs a human.
           </p>
           <div className="mt-3 flex gap-2">
