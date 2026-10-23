@@ -6,7 +6,8 @@ import { NextResponse } from "next/server";
 import { claudeJson } from "../../../../lib/skills/claude-json";
 import type { OptionScore } from "../../../../lib/skills/types";
 
-export const maxDuration = 60;
+// Needs Vercel Fluid compute (Hobby max 300s). Long documents + a skill exceed 60s.
+export const maxDuration = 300;
 export const dynamic = "force-dynamic";
 
 interface OptionOutput {

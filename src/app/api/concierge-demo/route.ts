@@ -8,7 +8,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createAnthropicClient } from "../../../lib/anthropic-client";
 
-export const maxDuration = 60;
+// Needs Vercel Fluid compute (Hobby max 300s). Long documents + a skill exceed 60s.
+export const maxDuration = 300;
 
 type ConciergeRequest = {
   action_description: string; // free text: the ONE action the team picked manually
@@ -18,7 +19,7 @@ type ConciergeRequest = {
   skill_name?: string;
 };
 
-const MAX_SKILL_CHARS = 20000;
+const MAX_SKILL_CHARS = 12000;
 
 function skillBlock(skillMd: string, skillName?: string): string {
   return `
@@ -85,7 +86,7 @@ export async function POST(req: NextRequest) {
 
     const response = await anthropic.messages.create({
       model: process.env.APA_SKILLS_MODEL?.trim() || "claude-sonnet-5",
-      max_tokens: 12000,
+      max_tokens: 6000,
       system: skill_md?.trim() ? SYSTEM_PROMPT + skillBlock(skill_md, skill_name) : SYSTEM_PROMPT,
       messages: [{ role: "user", content: userContent }],
     });
