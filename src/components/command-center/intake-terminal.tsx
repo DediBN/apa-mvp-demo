@@ -351,7 +351,7 @@ export function IntakeTerminal() {
         </div>
       </form>
 
-      {summaryData ? (
+      {SHOW_AGENT_SCORECARD && summaryData ? (
         <div className="mt-6">
           <ResultSummaryCard
             selectedAgentName={summaryData.selectedAgentName}

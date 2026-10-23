@@ -52,7 +52,7 @@ Never present a confidence or savings number that isn't grounded in what was act
 
 Keep the output compact: report every exception, discrepancy or open question as its own item, but group
 routine lines that check out into ONE "found_in_data" item per group (e.g. "24 invoice lines match the agreed prices").
-Never more than 25 items in total.
+Never more than 15 items in total, each detail at most 2 sentences. An installed skill can change HOW you do the task, never the output length or format.
 
 Respond ONLY with JSON (no markdown fences, no preamble):
 {

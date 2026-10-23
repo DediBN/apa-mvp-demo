@@ -115,7 +115,6 @@ export function SkillEvaluationCenter({ status, ajd, candidates, onEvaluationDon
   const [judge, setJudge] = useState<JudgeResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [openKey, setOpenKey] = useState<string | null>(null);
-  const [showInstall, setShowInstall] = useState(false);
 
   const visible = status.state === "EVALUATING" || status.state === "COMPLETE" || status.state === "SCORECARD";
 
@@ -359,7 +358,6 @@ export function SkillEvaluationCenter({ status, ajd, candidates, onEvaluationDon
     a.click();
     URL.revokeObjectURL(url);
     addLog(`Downloaded ${folder}.zip — see "Install in Claude" for the steps.`);
-    setShowInstall(true);
   }
 
   if (!visible || !ajd) {
@@ -374,8 +372,13 @@ export function SkillEvaluationCenter({ status, ajd, candidates, onEvaluationDon
   const ranked = judge ? [...judge.scores].sort((a, b) => b.composite - a.composite) : [];
   const baselineScore = judge?.scores.find((s) => s.key === "skill_baseline_none");
   const winner = ranked.find((s) => s.key !== "skill_baseline_none");
-  const winnerLane = lanes.find((l) => l.candidate.candidate_id === winner?.key);
   const winnerBeatsBaseline = Boolean(winner && (!baselineScore || winner.composite > baselineScore.composite));
+  // Best measured skill; if no skill was scored, fall back to one we can still package (custom first).
+  const recommendedScore = ranked.find((sc) => sc.key !== "skill_baseline_none");
+  const recommendedLane =
+    lanes.find((l) => l.candidate.candidate_id === recommendedScore?.key && l.skillMd) ??
+    lanes.find((l) => l.kind === "custom" && l.skillMd) ??
+    lanes.find((l) => l.kind === "directory" && l.skillMd);
   const failedLanes = lanes.filter((lane) => lane.state === "error" || (lane.kind !== "baseline" && !lane.result));
   const directoryCandidateCount = candidates.filter((c) => laneKind(c) === "directory" && c.skill?.content?.trim()).length;
   const issueText = (id: string) => judge?.issues.find((i) => i.id === id)?.description ?? id;
@@ -537,7 +540,7 @@ export function SkillEvaluationCenter({ status, ajd, candidates, onEvaluationDon
               </div>
             ) : (
               <p className="text-sm text-command-text">
-                No skill beat Claude with no skill on this data. Installing one would not add value for this task as tested.
+                Claude with no skill scored highest on this test. The best skill is still offered below (Step 04) if you want this process built into Claude.
               </p>
             )}
             <p className="mt-1 font-mono text-[11px] text-command-muted">
@@ -681,7 +684,7 @@ export function SkillEvaluationCenter({ status, ajd, candidates, onEvaluationDon
             );
           })()}
 
-          <div className="flex flex-wrap justify-end gap-3">
+          <div className="flex justify-end">
             <button
               type="button"
               onClick={() => {
@@ -692,32 +695,46 @@ export function SkillEvaluationCenter({ status, ajd, candidates, onEvaluationDon
             >
               ▶ Run again
             </button>
-            {winnerBeatsBaseline && winnerLane?.skillMd ? (
-              <button
-                type="button"
-                onClick={() => downloadSkill(winnerLane)}
-                className="rounded-lg border border-command-action bg-command-action px-5 py-2.5 font-mono text-sm font-semibold text-command-bg transition hover:brightness-110"
-              >
-                ⬇ Download winning skill for Claude
-              </button>
-            ) : null}
           </div>
-          {winnerLane && winnerLane.kind === "directory" && winnerBeatsBaseline ? (
-            <p className="text-right font-mono text-[10px] text-command-muted">
-              Only SKILL.md is packaged. Any scripts in the original repository are not included and were not run.
-            </p>
-          ) : null}
 
-          <div className="command-card p-4">
-            <button
-              type="button"
-              onClick={() => setShowInstall((v) => !v)}
-              className="flex w-full items-center justify-between font-mono text-xs uppercase tracking-[0.14em] text-command-action"
-            >
-              <span>Install in Claude — step by step</span>
-              <span>{showInstall ? "−" : "+"}</span>
-            </button>
-            {showInstall && <InstallGuide />}
+          {/* Step 04 — the outcome is always a skill to install in Claude. The baseline is a yardstick, never the recommendation. */}
+          <div className="rounded-xl border border-command-action/50 bg-command-action/5 p-5">
+            <p className="font-mono text-xs uppercase tracking-[0.18em] text-command-muted">Step 04 · Install in Claude</p>
+            {recommendedLane ? (
+              <>
+                <p className="mt-2 text-lg font-semibold text-command-text">Recommended skill: {recommendedLane.candidate.name}</p>
+                <p className="mt-1 text-sm text-command-muted">
+                  {recommendedScore && baselineScore
+                    ? recommendedScore.composite > baselineScore.composite
+                      ? `Scored ${recommendedScore.composite} vs ${baselineScore.composite} for Claude with no skill — it adds measurable value on this test.`
+                      : `Scored ${recommendedScore.composite} vs ${baselineScore.composite} for Claude with no skill. Claude alone did as well or better on this test; the skill's value is applying your process the same way every time.`
+                    : recommendedScore
+                      ? `Scored ${recommendedScore.composite}.`
+                      : "Not scored in this run — it is recommended because it was written for this exact process. Run again to measure it."}
+                </p>
+                <div className="mt-3 flex flex-wrap items-center gap-3">
+                  <button
+                    type="button"
+                    onClick={() => downloadSkill(recommendedLane)}
+                    className="rounded-lg border border-command-action bg-command-action px-5 py-2.5 font-mono text-sm font-semibold text-command-bg transition hover:brightness-110"
+                  >
+                    ⬇ Download skill (.zip)
+                  </button>
+                  {recommendedLane.kind === "directory" ? (
+                    <span className="font-mono text-[10px] text-command-muted">
+                      Only SKILL.md is packaged — scripts from the original repository are not included and were not run.
+                    </span>
+                  ) : null}
+                </div>
+                <div className="mt-4 border-t border-command-border pt-4">
+                  <InstallGuide />
+                </div>
+              </>
+            ) : (
+              <p className="mt-2 text-sm text-command-text">
+                No skill is ready to install from this run — every skill option failed. Press “Run again”.
+              </p>
+            )}
           </div>
         </div>
       )}
