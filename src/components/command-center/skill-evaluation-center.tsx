@@ -333,6 +333,7 @@ export function SkillEvaluationCenter({ status, ajd, candidates, onEvaluationDon
         mode === "scenarios" ? "generated_scenarios" : answerKey.trim() ? "answer_key" : "independent_audit";
       const aggregated: JudgeResponse = { ground_truth: groundTruth, issues, scores };
       setJudge(aggregated);
+      setOpenKey([...scores].sort((a, b) => b.composite - a.composite)[0]?.key ?? null);
       setStage("done");
       const ranked = [...scores].sort((a, b) => b.composite - a.composite);
       addLog(`Scoring done. Top: ${ranked[0]?.name} · ${ranked[0]?.composite}`);
@@ -375,6 +376,8 @@ export function SkillEvaluationCenter({ status, ajd, candidates, onEvaluationDon
   const winner = ranked.find((s) => s.key !== "skill_baseline_none");
   const winnerLane = lanes.find((l) => l.candidate.candidate_id === winner?.key);
   const winnerBeatsBaseline = Boolean(winner && (!baselineScore || winner.composite > baselineScore.composite));
+  const failedLanes = lanes.filter((lane) => lane.state === "error" || (lane.kind !== "baseline" && !lane.result));
+  const directoryCandidateCount = candidates.filter((c) => laneKind(c) === "directory" && c.skill?.content?.trim()).length;
   const issueText = (id: string) => judge?.issues.find((i) => i.id === id)?.description ?? id;
 
   return (
@@ -519,6 +522,19 @@ export function SkillEvaluationCenter({ status, ajd, candidates, onEvaluationDon
                 {baselineScore ? ` vs ${baselineScore.composite} for Claude with no skill` : ""} — it found {winner.found.length} of {judge.issues.length} issues
                 {winner.false_flags.length ? ` with ${winner.false_flags.length} false flag${winner.false_flags.length === 1 ? "" : "s"}` : " with no false flags"}.
               </p>
+            ) : !winner ? (
+              <div className="text-sm text-command-text">
+                <p className="font-semibold text-amber-400">No skill was actually tested — only Claude with no skill ran, so there is no comparison yet.</p>
+                {directoryCandidateCount === 0 && (
+                  <p className="mt-1 text-command-muted">Sourcing found no directory skill with a readable SKILL.md for this need.</p>
+                )}
+                {failedLanes.map((lane) => (
+                  <p key={lane.candidate.candidate_id} className="mt-1 text-command-muted">
+                    {lane.candidate.name}: <span className="text-red-400">{lane.error || "did not run"}</span>
+                  </p>
+                ))}
+                <p className="mt-1 text-command-muted">Press “Run again” to retry.</p>
+              </div>
             ) : (
               <p className="text-sm text-command-text">
                 No skill beat Claude with no skill on this data. Installing one would not add value for this task as tested.
@@ -588,6 +604,17 @@ export function SkillEvaluationCenter({ status, ajd, candidates, onEvaluationDon
                     </td>
                   </tr>
                 ))}
+                {failedLanes.map((lane) => (
+                  <tr key={lane.candidate.candidate_id} className="border-b border-command-border/60 text-command-muted">
+                    <td className="py-2 pr-2">—</td>
+                    <td className="py-2 pr-2">
+                      <span className="font-sans text-sm">{lane.candidate.name}</span>
+                    </td>
+                    <td colSpan={5} className="py-2 pr-2 text-red-400">
+                      Not scored: {lane.error || "did not run"}
+                    </td>
+                  </tr>
+                ))}
               </tbody>
             </table>
             <p className="mt-2 font-mono text-[10px] text-command-muted">Score = 60% recall + 30% precision + 10% grounding. Click a row for details.</p>
@@ -618,8 +645,8 @@ export function SkillEvaluationCenter({ status, ajd, candidates, onEvaluationDon
                     ))}
                   </div>
                 )}
-                <details>
-                  <summary className="cursor-pointer font-mono text-[11px] uppercase tracking-[0.14em] text-command-muted">Raw output ({lane.result?.items.length ?? 0} items)</summary>
+                <details open>
+                  <summary className="cursor-pointer font-mono text-[11px] uppercase tracking-[0.14em] text-command-muted">Output ({lane.result?.items.length ?? 0} items)</summary>
                   <div className="mt-2 space-y-2">
                     {lane.result?.items.map((item, i) => {
                       const meta = TAG_META[item.reliability] ?? TAG_META.cannot_demonstrate;

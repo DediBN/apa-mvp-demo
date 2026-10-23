@@ -56,16 +56,22 @@ export async function POST(request: Request) {
           system: SYSTEM,
           messages: [{ role: "user", content: user }]
         });
-        const text = response.content
+        const raw = response.content
           .map((block) => (block.type === "text" ? block.text : ""))
           .join("\n")
-          .replace(/^```(?:markdown|md)?\s*/i, "")
-          .replace(/```\s*$/, "")
+          .replace(/```(?:markdown|md|yaml)?/gi, "")
           .trim();
-        if (!text.startsWith("---")) {
-          throw new Error("Authored skill is missing frontmatter");
+        if (raw.length < 80) {
+          throw new Error("Authored skill is empty");
         }
-        const name = text.match(/^name:\s*(.+)$/m)?.[1]?.trim() || "custom-skill";
+        // Models sometimes add a preamble or drop the frontmatter: start at the frontmatter if present, else add one.
+        const fmStart = raw.search(/^---\s*$/m);
+        const fallbackName = (body.job_title || "custom-skill").toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "").slice(0, 64) || "custom-skill";
+        const text =
+          fmStart >= 0 && /^name:/m.test(raw.slice(fmStart))
+            ? raw.slice(fmStart)
+            : `---\nname: ${fallbackName}\ndescription: ${(body.mission || body.business_need || body.job_title || "").replace(/\s+/g, " ").slice(0, 200)}\n---\n\n${raw}`;
+        const name = text.match(/^name:\s*(.+)$/m)?.[1]?.trim() || fallbackName;
         return NextResponse.json({ skill_md: text, name });
       } catch (error) {
         lastError = error;
@@ -75,6 +81,6 @@ export async function POST(request: Request) {
   } catch (error) {
     const message = error instanceof Error ? error.message : "Could not author the skill";
     console.error("[skills/author]", message);
-    return NextResponse.json({ error: "Could not author the custom skill. Please try again." }, { status: 500 });
+    return NextResponse.json({ error: `Could not write the custom skill (${message.slice(0, 120)}). Please try again.` }, { status: 500 });
   }
 }
