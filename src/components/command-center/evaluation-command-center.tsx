@@ -79,7 +79,8 @@ function preferredSourceForDomain(domain: IntentDomain): Candidate["source"] | n
 function applyDomainSourceBias(baseFitScore: number, source: Candidate["source"], domain: IntentDomain): number {
   const preferredSource = preferredSourceForDomain(domain);
 
-  if (!preferredSource) {
+  // Vendor bias only applies to agent catalogs; skills are scored on screening fit alone.
+  if (!preferredSource || source === "SkillsMP" || source === "skills.sh" || source === "Custom Skill") {
     return baseFitScore;
   }
 

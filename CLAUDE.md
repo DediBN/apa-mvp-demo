@@ -41,6 +41,12 @@ Each agent has a `mock.ts` (types + static data) and a `client.ts` (fetches the 
 | Intake | `/api/intake/ajd` | Converts business need → AJD JSON via Claude |
 | Research (Sourcing) | `/api/sourcing/scan` | Returns candidate shortlist |
 | Evaluation | `/api/evaluation/run` | Runs 40 objection + 30 hallucination scenarios per candidate |
+| Skill Sourcing | `/api/sourcing/skills` | AJD → queries → SkillsMP + skills.sh → SKILL.md from GitHub → Claude screening → up to 3 skills + custom-skill option + no-skill baseline |
+| Readiness Check | `/api/concierge-demo` | Runs the AJD action on pasted real data; with `skill_md` it runs with that skill installed |
+
+### Skill mode (branch `feature/skill-acquisition`)
+
+The Sourcing Radar now sources **Claude Agent Skills** instead of agents (`src/lib/skills/`). Each directory is optional — a missing key skips that source (see `.env.example`). Executable parts of third-party skills are never run; only SKILL.md text is used. After sourcing, "Test Shortlisted Skills on Real Data" runs every readable skill and a no-skill baseline on the same data and compares reliability counts.
 
 `src/lib/anthropic-client.ts` — server-only singleton that reads `ANTHROPIC_API_KEY`. The intake route uses a model fallback chain starting with `claude-3-5-sonnet-latest`.
 

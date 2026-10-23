@@ -61,6 +61,7 @@ export function IntakeTerminal() {
   const [evaluationResults, setEvaluationResults] = useState<CandidateEvaluationResult[]>([]);
   const [selectedCandidateId, setSelectedCandidateId] = useState<string | null>(null);
   const [readinessAjd, setReadinessAjd] = useState<AJD | null>(null);
+  const [skillCheckOpen, setSkillCheckOpen] = useState(false);
   const [logs, setLogs] = useState<string[]>([
     `[${buildTimestamp()}] System ready. State=IDLE`
   ]);
@@ -299,6 +300,7 @@ export function IntakeTerminal() {
     setReviewMission("");
     setReviewKpis("");
     setShortlist([]);
+    setSkillCheckOpen(false);
     setEvaluationResults([]);
     setSelectedCandidateId(null);
     addLog("Run reset. State=IDLE");
@@ -489,6 +491,28 @@ export function IntakeTerminal() {
           onShortlistReady={handleShortlistReady}
           onFail={handleResearchFail}
         />
+        {ajd && shortlist.some((c) => c.skill) ? (
+          skillCheckOpen ? (
+            <AgentReadinessCheck
+              ajd={buildApprovedAjd(ajd)}
+              candidates={shortlist}
+              onClose={() => setSkillCheckOpen(false)}
+            />
+          ) : (
+            <div className="mt-3 flex justify-end">
+              <button
+                type="button"
+                onClick={() => {
+                  setSkillCheckOpen(true);
+                  addLog("Opened skill readiness check: shortlisted skills vs no-skill baseline on real data.");
+                }}
+                className="rounded-lg border border-command-border bg-transparent px-5 py-2.5 font-mono text-sm font-semibold text-command-text transition hover:border-command-action hover:text-command-action"
+              >
+                Test Shortlisted Skills on Real Data
+              </button>
+            </div>
+          )
+        ) : null}
       </div>
 
       <div className="mt-5">

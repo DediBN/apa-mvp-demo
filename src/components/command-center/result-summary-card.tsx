@@ -11,7 +11,7 @@ interface ResultSummaryCardProps {
   performanceImprovement?: number;
   useCaseSummary?: string;
   domainHint?: string;
-  selectedAgentSource: "OpenAI" | "Hugging Face" | "CrewAI";
+  selectedAgentSource: "OpenAI" | "Hugging Face" | "CrewAI" | "SkillsMP" | "skills.sh" | "Custom Skill";
   compositeScore: number;
   savingsPercent: number;
 }

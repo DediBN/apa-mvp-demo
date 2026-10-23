@@ -167,8 +167,9 @@ export function validateStateRequirements(status: APAStatus): string[] {
     errors.push("AJD must be generated before leaving INTAKE.");
   }
 
-  if ((state === "EVALUATING" || state === "COMPLETE" || state === "SCORECARD") && context.artifacts.candidateCount < 3) {
-    errors.push("At least 3 candidates are required before EVALUATING.");
+  if ((state === "EVALUATING" || state === "COMPLETE" || state === "SCORECARD") && context.artifacts.candidateCount < 2) {
+    // Skill mode: one option + the no-skill baseline is the minimum meaningful comparison.
+    errors.push("At least 2 candidates are required before EVALUATING.");
   }
 
   if ((state === "COMPLETE" || state === "SCORECARD") && !context.artifacts.evaluationsPersisted) {

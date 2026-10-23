@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 
-type AgentSource = "OpenAI" | "Hugging Face" | "CrewAI";
+type AgentSource = "OpenAI" | "Hugging Face" | "CrewAI" | "SkillsMP" | "skills.sh" | "Custom Skill";
 
 interface AgentProfileModalProps {
   isOpen: boolean;
@@ -124,6 +124,9 @@ function sourceIntegration(source: AgentSource): string {
   }
   if (source === "Hugging Face") {
     return "Hugging Face Hub";
+  }
+  if (source === "SkillsMP" || source === "skills.sh" || source === "Custom Skill") {
+    return "Claude Skills (SKILL.md)";
   }
   return "CrewAI Orchestrator";
 }

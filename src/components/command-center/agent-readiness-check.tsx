@@ -4,10 +4,13 @@
 
 import { useState, useCallback } from "react";
 import { AJD } from "../../lib/intake-agent/mock";
+import { Candidate } from "../../lib/research-agent/mock";
 
 export interface AgentReadinessCheckProps {
   ajd: AJD;
   onClose: () => void;
+  // Skill mode: run every shortlisted skill that has a SKILL.md, plus a no-skill baseline, on the same data.
+  candidates?: Candidate[];
 }
 
 type ReliabilityTag =
@@ -34,7 +37,30 @@ const TAG_META: Record<ReliabilityTag, { text: string; className: string }> = {
 
 const MAX_CHARS = 20000; // guard: no human moderates input size on this path
 
-export function AgentReadinessCheck({ ajd, onClose }: AgentReadinessCheckProps) {
+type RunResult = { items: ResultItem[]; summary: string };
+
+type ComparisonRow = {
+  key: string;
+  name: string;
+  source: string;
+  isBaseline: boolean;
+  result?: RunResult;
+  error?: string;
+};
+
+function countFound(result?: RunResult): number {
+  return result?.items.filter((i) => i.reliability === "found_in_data").length ?? 0;
+}
+
+function countByTag(result: RunResult | undefined, tag: ReliabilityTag): number {
+  return result?.items.filter((i) => i.reliability === tag).length ?? 0;
+}
+
+export function AgentReadinessCheck({ ajd, onClose, candidates }: AgentReadinessCheckProps) {
+  const skillMode = Array.isArray(candidates);
+  const runnableSkills = (candidates ?? []).filter((c) => Boolean(c.skill?.content?.trim()));
+  const [comparison, setComparison] = useState<ComparisonRow[]>([]);
+  const [openRow, setOpenRow] = useState<string | null>(null);
   const [stage, setStage] = useState<"ask" | "collecting" | "running" | "done">("ask");
   const [customerData, setCustomerData] = useState("");
   const [referenceData, setReferenceData] = useState("");
@@ -73,6 +99,51 @@ export function AgentReadinessCheck({ ajd, onClose }: AgentReadinessCheckProps) 
     ]
       .filter(Boolean)
       .join("\n");
+
+    if (skillMode) {
+      const runs: Array<{ key: string; name: string; source: string; isBaseline: boolean; skill_md?: string }> = [
+        { key: "baseline", name: "Baseline: Claude with no skill", source: "Control", isBaseline: true },
+        ...runnableSkills.map((c) => ({
+          key: c.candidate_id,
+          name: c.name,
+          source: c.source,
+          isBaseline: false,
+          skill_md: c.skill?.content
+        }))
+      ];
+      const rows = await Promise.all(
+        runs.map(async (run): Promise<ComparisonRow> => {
+          try {
+            const res = await fetch("/api/concierge-demo", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({
+                action_description: actionDescription,
+                customer_data: customerData.slice(0, MAX_CHARS),
+                reference_data: referenceData.slice(0, MAX_CHARS),
+                skill_md: run.skill_md,
+                skill_name: run.isBaseline ? undefined : run.name
+              })
+            });
+            const data = await res.json().catch(() => ({}));
+            if (!res.ok || !Array.isArray(data?.items)) {
+              throw new Error(data?.error || `Run failed (${res.status})`);
+            }
+            return { key: run.key, name: run.name, source: run.source, isBaseline: run.isBaseline, result: data as RunResult };
+          } catch (e: unknown) {
+            return { key: run.key, name: run.name, source: run.source, isBaseline: run.isBaseline, error: e instanceof Error ? e.message : "Run failed" };
+          }
+        })
+      );
+      if (rows.every((r) => r.error)) {
+        setError("None of the runs completed. Try a shorter or clearer sample.");
+        setStage("collecting");
+        return;
+      }
+      setComparison(rows);
+      setStage("done");
+      return;
+    }
 
     try {
       const res = await fetch("/api/concierge-demo", {
@@ -121,7 +192,9 @@ export function AgentReadinessCheck({ ajd, onClose }: AgentReadinessCheckProps) 
       {stage === "ask" && (
         <div className="mt-3">
           <p className="font-mono text-sm text-command-text">
-            Want to test this agent on your own real data?
+            {skillMode
+              ? `Test ${runnableSkills.length} shortlisted skill${runnableSkills.length === 1 ? "" : "s"} against Claude with no skill, on your own data?`
+              : "Want to test this agent on your own real data?"}
           </p>
           <p className="mt-2 text-sm text-command-muted">
             No connection to any of your systems — you paste or upload a real
@@ -201,7 +274,98 @@ export function AgentReadinessCheck({ ajd, onClose }: AgentReadinessCheckProps) 
       {stage === "running" && (
         <div className="mt-3 flex items-center gap-2">
           <span className="h-2.5 w-2.5 animate-pulse rounded-full bg-emerald-400" />
-          <p className="text-sm text-command-muted">Reading your data and checking the agent against it…</p>
+          <p className="text-sm text-command-muted">{skillMode ? `Running ${runnableSkills.length + 1} options on your data in parallel…` : "Reading your data and checking the agent against it…"}</p>
+        </div>
+      )}
+
+      {stage === "done" && skillMode && comparison.length > 0 && (
+        <div className="mt-3">
+          <p className="text-sm text-command-muted">
+            Same data, same task. Each skill runs as installed in Claude; the baseline runs with no skill. A skill earns its place only if it beats the baseline.
+          </p>
+          <div className="mt-3 overflow-x-auto">
+            <table className="w-full min-w-[520px] border-collapse font-mono text-xs">
+              <thead>
+                <tr className="border-b border-command-border text-left text-command-muted">
+                  <th className="py-2 pr-2 font-normal">Option</th>
+                  <th className="py-2 pr-2 font-normal text-emerald-400">Found</th>
+                  <th className="py-2 pr-2 font-normal text-violet-400">Inferred</th>
+                  <th className="py-2 pr-2 font-normal text-amber-400">Approval</th>
+                  <th className="py-2 pr-2 font-normal text-red-400">Missing</th>
+                  <th className="py-2 pr-2 font-normal">vs baseline</th>
+                </tr>
+              </thead>
+              <tbody>
+                {comparison.map((row) => {
+                  const baseline = comparison.find((r) => r.isBaseline);
+                  const delta = row.isBaseline || !row.result || !baseline?.result ? null : countFound(row.result) - countFound(baseline.result);
+                  return (
+                    <tr
+                      key={row.key}
+                      onClick={() => setOpenRow(openRow === row.key ? null : row.key)}
+                      className="cursor-pointer border-b border-command-border/60 text-command-text hover:bg-command-action/5"
+                    >
+                      <td className="py-2 pr-2">
+                        <span className="font-sans text-sm font-semibold">{row.name}</span>
+                        <span className="ml-2 text-[10px] uppercase tracking-[0.12em] text-command-muted">{row.source}</span>
+                      </td>
+                      {row.error ? (
+                        <td colSpan={5} className="py-2 pr-2 text-red-400">{row.error}</td>
+                      ) : (
+                        <>
+                          <td className="py-2 pr-2">{countByTag(row.result, "found_in_data")}</td>
+                          <td className="py-2 pr-2">{countByTag(row.result, "inferred")}</td>
+                          <td className="py-2 pr-2">{countByTag(row.result, "needs_approval")}</td>
+                          <td className="py-2 pr-2">{countByTag(row.result, "missing_info") + countByTag(row.result, "cannot_demonstrate")}</td>
+                          <td className={`py-2 pr-2 ${delta === null ? "text-command-muted" : delta > 0 ? "text-emerald-400" : delta < 0 ? "text-red-400" : "text-command-muted"}`}>
+                            {delta === null ? "—" : `${delta > 0 ? "+" : ""}${delta} found`}
+                          </td>
+                        </>
+                      )}
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+          {runnableSkills.length === 0 && (
+            <p className="mt-2 text-xs text-amber-400">No shortlisted skill had a readable SKILL.md, so only the baseline ran.</p>
+          )}
+          {(() => {
+            const row = comparison.find((r) => r.key === openRow);
+            if (!row?.result) {
+              return <p className="mt-2 text-xs text-command-muted">Click a row to see its line-by-line results.</p>;
+            }
+            return (
+              <div className="mt-3 space-y-2">
+                <p className="text-sm text-command-text">{row.result.summary}</p>
+                {row.result.items.map((item, i) => {
+                  const meta = TAG_META[item.reliability] ?? TAG_META.cannot_demonstrate;
+                  return (
+                    <div key={i} className="rounded border border-command-border bg-command-bg/60 p-2.5">
+                      <div className="flex items-center justify-between gap-2">
+                        <span className="text-sm font-semibold text-command-text">{item.label}</span>
+                        <span className={`rounded border px-2 py-0.5 font-mono text-[10px] ${meta.className}`}>{meta.text}</span>
+                      </div>
+                      <p className="mt-1 text-sm text-command-text">{item.detail}</p>
+                      {item.reason && <p className="mt-0.5 text-xs text-command-muted">{item.reason}</p>}
+                    </div>
+                  );
+                })}
+              </div>
+            );
+          })()}
+          <button
+            type="button"
+            onClick={() => {
+              setStage("collecting");
+              setComparison([]);
+              setOpenRow(null);
+            }}
+            className="mt-3 w-full rounded border border-command-border py-2 font-mono text-xs text-command-muted transition hover:text-command-text"
+          >
+            ▶ Try another example
+          </button>
         </div>
       )}
 

@@ -4,7 +4,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { APAStatus } from "../../lib/state-machine";
 import { AJD } from "../../lib/intake-agent/mock";
 import { Candidate } from "../../lib/research-agent/mock";
-import { runSourcingScan } from "../../lib/research-agent/client";
+import { runSkillSourcingScan } from "../../lib/research-agent/client";
 import { StatusPill } from "../ui/status-pill";
 
 interface SourcingRadarProps {
@@ -15,39 +15,42 @@ interface SourcingRadarProps {
   addLog: (line: string) => void;
 }
 
-const SOURCING_TIMEOUT_MS = 8000;
-const API_REPLACE_WINDOW_MS = 4000;
+// Skill sourcing = query planning + 2 directories + SKILL.md retrieval + screening, so allow time for it.
+const SOURCING_TIMEOUT_MS = 55000;
+const API_REPLACE_WINDOW_MS = 55000;
 
 function buildLocalFallbackCandidates(ajd: AJD): Candidate[] {
   return [
     {
-      candidate_id: "cand_local_fb_01",
-      name: `${ajd.job_title} Copilot`,
-      source: "OpenAI",
-      fit_score_pre_eval: 84,
-      reason_codes: ["Aligned with AJD mission", "Strong instruction-following profile"],
-      risk_flags: ["Needs prompt guardrails"]
+      candidate_id: "skill_custom_ajd",
+      name: `Custom skill: ${ajd.job_title}`,
+      source: "Custom Skill",
+      fit_score_pre_eval: 70,
+      reason_codes: ["Authored from the approved AJD", "Used while directory search is unavailable"],
+      risk_flags: ["Not yet written — must be authored and tested before deployment"],
+      skill: { directory: "Custom", author: "APA" }
     },
     {
-      candidate_id: "cand_local_fb_02",
-      name: `${ajd.domain} Retrieval Agent`,
-      source: "Hugging Face",
-      fit_score_pre_eval: 79,
-      reason_codes: ["Fast retrieval stack", "Good connector ecosystem"],
-      risk_flags: ["Requires domain tuning"]
-    },
-    {
-      candidate_id: "cand_local_fb_03",
-      name: `${ajd.domain} Orchestrator`,
-      source: "CrewAI",
-      fit_score_pre_eval: 81,
-      reason_codes: ["Strong multi-agent coordination", "Good escalation pathways"],
-      risk_flags: ["Higher orchestration complexity"]
+      candidate_id: "skill_baseline_none",
+      name: "Baseline: Claude with no skill",
+      source: "Custom Skill",
+      fit_score_pre_eval: 50,
+      reason_codes: ["Control group — Claude without any skill", "Every skill must beat this to justify installing it"],
+      risk_flags: ["Not a deployable skill"],
+      skill: { directory: "Custom", author: "Anthropic (base model)" }
     }
   ];
 }
 
 function sourceTone(source: Candidate["source"]): string {
+  if (source === "SkillsMP") {
+    return "border-command-action/50 text-command-action";
+  }
+
+  if (source === "skills.sh") {
+    return "border-command-pass/50 text-command-pass";
+  }
+
   if (source === "OpenAI") {
     return "border-command-action/50 text-command-action";
   }
@@ -67,6 +70,9 @@ export function SourcingRadar({ status, ajd, onShortlistReady, onFail, addLog }:
   const hasRequestedRef = useRef(false);
   const replaceDeadlineRef = useRef<number | null>(null);
   const latestShortlistRef = useRef<Candidate[]>([]);
+  // Identifies the current scan. Re-renders must not cancel an in-flight scan (the effect re-runs when
+  // isScanning flips), only a pipeline reset does.
+  const scanRunRef = useRef(0);
 
   useEffect(() => {
     latestShortlistRef.current = shortlist;
@@ -74,6 +80,7 @@ export function SourcingRadar({ status, ajd, onShortlistReady, onFail, addLog }:
 
   useEffect(() => {
     if (status.state === "IDLE" || status.state === "INTAKE") {
+      scanRunRef.current += 1;
       hasTransitionedRef.current = false;
       hasRequestedRef.current = false;
       replaceDeadlineRef.current = null;
@@ -95,7 +102,8 @@ export function SourcingRadar({ status, ajd, onShortlistReady, onFail, addLog }:
     }
 
     const readyAjd = ajd;
-    let canceled = false;
+    const runId = ++scanRunRef.current;
+    const isStale = () => runId !== scanRunRef.current;
     const fallbackCandidates = buildLocalFallbackCandidates(readyAjd);
 
     hasRequestedRef.current = true;
@@ -103,7 +111,7 @@ export function SourcingRadar({ status, ajd, onShortlistReady, onFail, addLog }:
     setIsScanning(true);
     setVisibleCount(0);
     setShortlist(fallbackCandidates);
-    addLog("Sourcing Radar activated. Scanning Hugging Face, OpenAI, CrewAI.");
+    addLog("Sourcing Radar activated. Scanning skill directories: SkillsMP, skills.sh.");
 
     const jobTitle = readyAjd.job_title?.trim() || `${readyAjd.domain} Automation Agent`;
     const mission = readyAjd.agent_profile?.mission?.trim() || readyAjd.business_need?.trim() || "Automate core workflows with safe escalation controls";
@@ -113,13 +121,21 @@ export function SourcingRadar({ status, ajd, onShortlistReady, onFail, addLog }:
     Promise.race<Candidate[]>([
       (() => {
         console.log("CALLING API NOW", Date.now());
-        return runSourcingScan({
+        return runSkillSourcingScan({
           jobTitle,
           mission,
-          kpis: readyAjd.agent_profile?.kpis ?? [],
-          integrations: readyAjd.integrations as Record<string, string> ?? {},
-          stack_hint: "neutral",
-          budget_tier: "smb"
+          kpis: readyAjd.agent_profile?.kpis ?? []
+        }).then(({ candidates, meta }) => {
+          if (meta.queries) {
+            addLog(`Skill search: "${meta.queries.semantic_query.slice(0, 60)}" + [${meta.queries.keyword_queries.join(", ")}]`);
+          }
+          if (meta.found) {
+            addLog(`Directories: SkillsMP ${meta.found.skillsmp} · skills.sh ${meta.found.skills_sh} · unique ${meta.found.unique} · readable SKILL.md ${meta.readable_skill_md ?? 0}`);
+          }
+          if (meta.sources_enabled && (!meta.sources_enabled.skillsmp || !meta.sources_enabled.skills_sh)) {
+            addLog(`Source keys — SkillsMP: ${meta.sources_enabled.skillsmp ? "on" : "missing"}, skills.sh: ${meta.sources_enabled.skills_sh ? "on" : "missing"}`);
+          }
+          return candidates;
         });
       })(),
       new Promise<Candidate[]>((_, reject) => {
@@ -127,7 +143,7 @@ export function SourcingRadar({ status, ajd, onShortlistReady, onFail, addLog }:
       })
     ])
       .then((result) => {
-        if (canceled) {
+        if (isStale()) {
           return;
         }
 
@@ -136,8 +152,8 @@ export function SourcingRadar({ status, ajd, onShortlistReady, onFail, addLog }:
         console.log("API response time:", Date.now() - startTime, "ms");
         console.log("API returned:", result?.length, result?.[0]?.name);
 
-        if (!Array.isArray(result) || result.length < 3) {
-          addLog("Sourcing API returned fewer than 3 candidates. Using local fallback shortlist.");
+        if (!Array.isArray(result) || result.length < 2) {
+          addLog("Skill sourcing returned fewer than 2 options. Using local fallback shortlist.");
           return;
         }
 
@@ -149,7 +165,7 @@ export function SourcingRadar({ status, ajd, onShortlistReady, onFail, addLog }:
         }
       })
       .catch((error) => {
-        if (canceled) {
+        if (isStale()) {
           return;
         }
 
@@ -157,14 +173,11 @@ export function SourcingRadar({ status, ajd, onShortlistReady, onFail, addLog }:
         addLog(`Sourcing API error/timeout: ${reason}. Keeping local fallback shortlist.`);
       })
       .finally(() => {
-        if (!canceled) {
+        if (!isStale()) {
           setIsScanning(false);
         }
       });
 
-    return () => {
-      canceled = true;
-    };
   }, [addLog, ajd, isScanning, onFail, shortlist.length, status.state]);
 
   useEffect(() => {
@@ -243,7 +256,7 @@ export function SourcingRadar({ status, ajd, onShortlistReady, onFail, addLog }:
           <p className="mt-3 font-mono text-xs text-command-muted">
             {status.state === "RESEARCH"
               ? isScanning
-                ? "Scanning agent catalogs..."
+                ? "Scanning skill directories..."
                 : shortlist.length > 0
                   ? "Scan complete"
                   : "Awaiting research trigger"
@@ -269,6 +282,19 @@ export function SourcingRadar({ status, ajd, onShortlistReady, onFail, addLog }:
 
                   <p className="mt-2 font-mono text-xs text-command-muted">Score available after evaluation</p>
                   <p className="mt-2 text-xs text-command-muted">{candidate.reason_codes[0]}</p>
+                  {candidate.reason_codes[1] ? (
+                    <p className="mt-1 font-mono text-[10px] text-command-muted">{candidate.reason_codes[1]}</p>
+                  ) : null}
+                  {candidate.skill?.pageUrl || candidate.skill?.githubUrl ? (
+                    <a
+                      href={candidate.skill.pageUrl || candidate.skill.githubUrl}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="mt-2 inline-block font-mono text-[10px] uppercase tracking-[0.14em] text-command-action hover:underline"
+                    >
+                      View SKILL.md source ↗
+                    </a>
+                  ) : null}
                 </article>
               ))
             )}
