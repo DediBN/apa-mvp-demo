@@ -231,7 +231,7 @@ export async function POST(request: Request) {
       found: { skillsmp: mpSemantic.length + mpKeyword.length, skills_sh: shHits.length, unique: allHits.length },
       readable_skill_md: withContent.length,
       sources_enabled: {
-        skillsmp: Boolean(process.env.SKILLSMP_API_KEY?.trim()),
+        skillsmp: true, // works anonymously; a key only raises the quota
         skills_sh: Boolean(process.env.SKILLS_SH_API_KEY?.trim() || oidcHeader || process.env.VERCEL_OIDC_TOKEN?.trim())
       }
     };

@@ -87,8 +87,9 @@ function mapSkillsMp(record: Record<string, unknown>): SkillHit | null {
 }
 
 export async function searchSkillsMp(query: string, mode: "keyword" | "semantic"): Promise<SkillHit[]> {
+  // The key is optional: anonymous access works with a lower quota (~50 searches/day, 10/min).
   const key = process.env.SKILLSMP_API_KEY?.trim();
-  if (!key || !query.trim()) {
+  if (!query.trim()) {
     return [];
   }
   const path = mode === "semantic" ? "ai-search" : "search";
@@ -98,7 +99,7 @@ export async function searchSkillsMp(query: string, mode: "keyword" | "semantic"
     params.set("sortBy", "stars");
   }
   try {
-    const payload = await fetchJson(`https://skillsmp.com/api/v1/skills/${path}?${params}`, { Authorization: `Bearer ${key}` });
+    const payload = await fetchJson(`https://skillsmp.com/api/v1/skills/${path}?${params}`, key ? { Authorization: `Bearer ${key}` } : {});
     return findRecords(payload).map(mapSkillsMp).filter((x): x is SkillHit => x !== null);
   } catch (error) {
     console.warn(`[skills] SkillsMP ${path} failed:`, error instanceof Error ? error.message : error);
