@@ -3,6 +3,7 @@
 import { useCallback, useMemo, useState } from "react";
 import { APAStatus } from "../../lib/state-machine";
 import { AJD } from "../../lib/intake-agent/mock";
+import { readUploadAsText, UPLOAD_ACCEPT } from "../../lib/files/read-upload";
 import { Candidate } from "../../lib/research-agent/mock";
 import { CandidateEvaluationResult } from "../../lib/evaluation-agent/mock";
 import type { GeneratedScenario, JudgeResponse, OptionScore } from "../../lib/skills/types";
@@ -127,15 +128,19 @@ export function SkillEvaluationCenter({ status, ajd, candidates, onEvaluationDon
     [candidates, authorCustom]
   );
 
-  const readFile = useCallback((file: File, setter: (v: string) => void) => {
-    if (file.size > 2_000_000) {
-      setError("File too large (max 2MB). Try a smaller sample.");
-      return;
+  const [fileStatus, setFileStatus] = useState<string | null>(null);
+
+  const readFile = useCallback(async (file: File, setter: (v: string) => void) => {
+    setError(null);
+    setFileStatus(`Reading ${file.name}…`);
+    try {
+      const { text, note } = await readUploadAsText(file, MAX_CHARS);
+      setter(text);
+      setFileStatus(note ? `${file.name}: ${note}` : `${file.name} loaded.`);
+    } catch (e) {
+      setFileStatus(null);
+      setError(e instanceof Error ? e.message : "Could not read that file — paste the content instead.");
     }
-    const reader = new FileReader();
-    reader.onload = () => setter(String(reader.result || "").slice(0, MAX_CHARS));
-    reader.onerror = () => setError("Could not read that file — paste the content instead.");
-    reader.readAsText(file);
   }, []);
 
   const updateLane = (id: string, patch: Partial<Lane>) =>
@@ -427,7 +432,7 @@ export function SkillEvaluationCenter({ status, ajd, candidates, onEvaluationDon
                   placeholder="Paste records, or upload a .csv / .txt file"
                   className="w-full rounded border border-command-border bg-command-bg p-2 font-mono text-xs text-command-text"
                 />
-                <input type="file" accept=".txt,.csv,.md" onChange={(e) => e.target.files?.[0] && readFile(e.target.files[0], setCustomerData)} className="text-xs text-command-muted" />
+                <input type="file" accept={UPLOAD_ACCEPT} onChange={(e) => e.target.files?.[0] && readFile(e.target.files[0], setCustomerData)} className="text-xs text-command-muted" />
 
                 <p className="pt-2 font-mono text-xs uppercase tracking-[0.14em] text-command-muted">Reference (optional) — price list, catalog, policy</p>
                 <textarea
@@ -436,7 +441,7 @@ export function SkillEvaluationCenter({ status, ajd, candidates, onEvaluationDon
                   onChange={(e) => setReferenceData(e.target.value)}
                   className="w-full rounded border border-command-border bg-command-bg p-2 font-mono text-xs text-command-text"
                 />
-                <input type="file" accept=".txt,.csv,.md" onChange={(e) => e.target.files?.[0] && readFile(e.target.files[0], setReferenceData)} className="text-xs text-command-muted" />
+                <input type="file" accept={UPLOAD_ACCEPT} onChange={(e) => e.target.files?.[0] && readFile(e.target.files[0], setReferenceData)} className="text-xs text-command-muted" />
 
                 <p className="pt-2 font-mono text-xs uppercase tracking-[0.14em] text-command-muted">Answer key (optional, for testing)</p>
                 <p className="text-xs text-command-muted">
@@ -448,7 +453,7 @@ export function SkillEvaluationCenter({ status, ajd, candidates, onEvaluationDon
                   onChange={(e) => setAnswerKey(e.target.value)}
                   className="w-full rounded border border-command-border bg-command-bg p-2 font-mono text-xs text-command-text"
                 />
-                <input type="file" accept=".txt,.csv,.md" onChange={(e) => e.target.files?.[0] && readFile(e.target.files[0], setAnswerKey)} className="text-xs text-command-muted" />
+                <input type="file" accept={UPLOAD_ACCEPT} onChange={(e) => e.target.files?.[0] && readFile(e.target.files[0], setAnswerKey)} className="text-xs text-command-muted" />
               </div>
             )}
 
@@ -465,6 +470,7 @@ export function SkillEvaluationCenter({ status, ajd, candidates, onEvaluationDon
                 ))}
               </div>
 
+              {fileStatus && <p className="font-mono text-xs text-command-action">{fileStatus}</p>}
               {error && <p className="text-sm text-red-400">{error}</p>}
 
               <button

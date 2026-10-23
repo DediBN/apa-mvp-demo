@@ -4,6 +4,7 @@
 
 import { useState, useCallback } from "react";
 import { AJD } from "../../lib/intake-agent/mock";
+import { readUploadAsText, UPLOAD_ACCEPT } from "../../lib/files/read-upload";
 import { Candidate } from "../../lib/research-agent/mock";
 
 export interface AgentReadinessCheckProps {
@@ -67,15 +68,19 @@ export function AgentReadinessCheck({ ajd, onClose, candidates }: AgentReadiness
   const [error, setError] = useState<string | null>(null);
   const [result, setResult] = useState<{ items: ResultItem[]; summary: string } | null>(null);
 
-  const readTextFile = useCallback((file: File, setter: (v: string) => void) => {
-    if (file.size > 2_000_000) {
-      setError("File too large (max 2MB for this preview). Try a smaller sample.");
-      return;
+  const [fileStatus, setFileStatus] = useState<string | null>(null);
+
+  const readTextFile = useCallback(async (file: File, setter: (v: string) => void) => {
+    setError(null);
+    setFileStatus(`Reading ${file.name}…`);
+    try {
+      const { text, note } = await readUploadAsText(file, MAX_CHARS);
+      setter(text);
+      setFileStatus(note ? `${file.name}: ${note}` : `${file.name} loaded.`);
+    } catch (e) {
+      setFileStatus(null);
+      setError(e instanceof Error ? e.message : "Could not read that file — paste the content instead.");
     }
-    const reader = new FileReader();
-    reader.onload = () => setter(String(reader.result || "").slice(0, MAX_CHARS));
-    reader.onerror = () => setError("Could not read that file — try pasting the content as text instead.");
-    reader.readAsText(file);
   }, []);
 
   async function runCheck() {
@@ -235,7 +240,7 @@ export function AgentReadinessCheck({ ajd, onClose, candidates }: AgentReadiness
             />
             <input
               type="file"
-              accept=".txt,.csv,.md"
+              accept={UPLOAD_ACCEPT}
               onChange={(e) => e.target.files?.[0] && readTextFile(e.target.files[0], setCustomerData)}
               className="mt-1 text-xs text-command-muted"
             />
@@ -253,13 +258,14 @@ export function AgentReadinessCheck({ ajd, onClose, candidates }: AgentReadiness
             />
             <input
               type="file"
-              accept=".txt,.csv,.md"
+              accept={UPLOAD_ACCEPT}
               onChange={(e) => e.target.files?.[0] && readTextFile(e.target.files[0], setReferenceData)}
               className="mt-1 text-xs text-command-muted"
             />
           </div>
 
-          {error && <p className="text-sm text-red-400">{error}</p>}
+          {fileStatus && <p className="font-mono text-xs text-command-action">{fileStatus}</p>}
+              {error && <p className="text-sm text-red-400">{error}</p>}
 
           <button
             type="button"
