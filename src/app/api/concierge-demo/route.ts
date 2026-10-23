@@ -50,6 +50,10 @@ For EVERY discrete result item, classify it into exactly one of these five categ
 
 Never present a confidence or savings number that isn't grounded in what was actually given.
 
+Keep the output compact: report every exception, discrepancy or open question as its own item, but group
+routine lines that check out into ONE "found_in_data" item per group (e.g. "24 invoice lines match the agreed prices").
+Never more than 25 items in total.
+
 Respond ONLY with JSON (no markdown fences, no preamble):
 {
   "items": [
@@ -81,7 +85,7 @@ export async function POST(req: NextRequest) {
 
     const response = await anthropic.messages.create({
       model: process.env.APA_SKILLS_MODEL?.trim() || "claude-sonnet-5",
-      max_tokens: 4096,
+      max_tokens: 12000,
       system: skill_md?.trim() ? SYSTEM_PROMPT + skillBlock(skill_md, skill_name) : SYSTEM_PROMPT,
       messages: [{ role: "user", content: userContent }],
     });
@@ -96,7 +100,23 @@ export async function POST(req: NextRequest) {
     try {
       parsed = JSON.parse(cleaned);
     } catch {
-      parsed = { items: [], summary: "Could not parse model output", raw: rawText };
+      const start = cleaned.indexOf("{");
+      const end = cleaned.lastIndexOf("}");
+      try {
+        parsed = start >= 0 && end > start ? JSON.parse(cleaned.slice(start, end + 1)) : null;
+      } catch {
+        parsed = null;
+      }
+    }
+
+    // A failed parse must surface as an error, never as an empty result (empty reads as "found nothing").
+    if (!parsed || !Array.isArray(parsed.items)) {
+      console.error("[concierge-demo] unparseable output", { stop_reason: response.stop_reason, length: rawText.length });
+      const truncated = response.stop_reason === "max_tokens";
+      return NextResponse.json(
+        { error: truncated ? "The result was too long and got cut off. Try a smaller sample." : "The model returned an unreadable result. Please run again." },
+        { status: 502 }
+      );
     }
 
     return NextResponse.json(parsed);
