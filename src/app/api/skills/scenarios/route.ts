@@ -35,7 +35,9 @@ Then write the answer_key: one checkable expected outcome per line.
   easy-to-miss requirement.
 The answer key applies the business's own stated rules literally: where the need says to stop, refuse or ask (for
 example when a price is missing), the expected outcome is to stop, refuse or ask as stated — never a guessed or
-partial completion the rules do not allow. Do not add requirements the business need does not state or clearly imply
+partial completion the rules do not allow. When a stop rule applies to a case, the expected outcome for that case
+is the stop itself — which items are missing, what to ask for, and that nothing is invented — never totals or a
+finished deliverable for that case. Every scenario must still have at least one case where nothing triggers a stop. Do not add requirements the business need does not state or clearly imply
 (no extra fields, validity dates, legal clauses or wording preferences of your own).
 Scenarios must differ from each other in format and difficulty. Keep each customer_data under 3500 characters.`;
 
