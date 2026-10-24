@@ -85,17 +85,21 @@ export async function POST(request: Request) {
     if (!body.business_need && !body.job_title) {
       return NextResponse.json({ error: "business_need or job_title is required" }, { status: 400 });
     }
-    const result = await pinnedJson<{ requirements: Array<{ description: string; check?: unknown }> }>(
-      SYSTEM,
-      `job_title: ${body.job_title ?? ""}\nbusiness_need: ${body.business_need ?? ""}\nmission: ${body.mission ?? ""}\n\nSubmit the requirements.`,
-      2000,
-      SCHEMA
-    );
-    const requirements: FormatRequirement[] = (Array.isArray(result.requirements) ? result.requirements : [])
-      .filter((r) => r?.description?.trim())
-      .slice(0, 8)
-      .map((r, i) => ({ id: `F${i + 1}`, description: r.description.trim(), check: cleanCheck(r.check) }));
-    if (requirements.length === 0) throw new Error("No format requirements");
+    // A contract of fewer than 4 points is too thin to score format on; ask again (same pinned model).
+    let requirements: FormatRequirement[] = [];
+    for (let attempt = 0; attempt < 3 && requirements.length < 4; attempt += 1) {
+      const result = await pinnedJson<{ requirements: Array<{ description: string; check?: unknown }> }>(
+        SYSTEM,
+        `job_title: ${body.job_title ?? ""}\nbusiness_need: ${body.business_need ?? ""}\nmission: ${body.mission ?? ""}\n\nSubmit 5 to 8 requirements.`,
+        2000,
+        SCHEMA
+      );
+      requirements = (Array.isArray(result.requirements) ? result.requirements : [])
+        .filter((r) => r?.description?.trim())
+        .slice(0, 8)
+        .map((r, i) => ({ id: `F${i + 1}`, description: r.description.trim(), check: cleanCheck(r.check) }));
+    }
+    if (requirements.length < 4) throw new Error("No format requirements");
     return NextResponse.json({ requirements });
   } catch (error) {
     console.error("[skills/format-contract]", error instanceof Error ? error.message : error);

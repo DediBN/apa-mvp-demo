@@ -293,7 +293,9 @@ export function SkillEvaluationCenter({ status, ajd, candidates, onEvaluationDon
             const body = {
               action_description: requestMode === "everyday" ? everydayRequest : actionDescription,
               customer_data: set.customer.slice(0, MAX_CHARS),
-              reference_data: set.reference.slice(0, MAX_CHARS),
+              // Everyday test on generated scenarios: only the customer's request, as it arrives. The business's own
+              // prices and rules are not handed over — knowing them is the skill's job. (Your own uploaded reference is kept.)
+              reference_data: requestMode === "everyday" && mode === "scenarios" ? "" : set.reference.slice(0, MAX_CHARS),
               skill_md: skillByLane.get(lane.candidate.candidate_id),
               skill_name: lane.kind === "baseline" ? undefined : lane.candidate.name
             };
@@ -613,7 +615,8 @@ export function SkillEvaluationCenter({ status, ajd, candidates, onEvaluationDon
                 <label className="flex items-start gap-2">
                   <input type="radio" className="mt-1" checked={requestMode === "everyday"} onChange={() => setRequestMode("everyday")} />
                   <span>
-                    The everyday request (realistic) — the task only, the way an employee asks. Your rules must come from the skill.
+                    The everyday request (realistic) — the task and the customer&apos;s message, the way an employee asks. Your prices and rules
+                    must come from the skill.
                   </span>
                 </label>
                 <label className="flex items-start gap-2">
@@ -733,7 +736,9 @@ export function SkillEvaluationCenter({ status, ajd, candidates, onEvaluationDon
             </p>
             <p className="mt-1 font-mono text-[11px] text-command-muted">
               Asked: {ranWith === "everyday"
-                ? "the everyday request only — your rules were not repeated to any option; a skill had to supply them"
+                ? mode === "scenarios"
+                  ? "the everyday request and the customer's message only — your prices and rules were not handed to any option; a skill had to supply them"
+                  : "the everyday request and your data — your rules were not repeated to any option; a skill had to supply them"
                 : "your full Skill Spec on every run — shows what Claude can do when you spell everything out each time"}
             </p>
             {unscoredRuns > 0 && (
