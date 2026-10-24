@@ -263,18 +263,21 @@ export function SkillEvaluationCenter({ status, ajd, candidates, onEvaluationDon
     // 3. Ground truth is fixed once per test set, before any output exists (and in parallel with the runs).
     const truthP = Promise.all(
       sets.map((set) =>
-        postJson<{ issues: Issue[]; source: string }>("/api/skills/ground-truth", {
+        postJson<{ issues: Issue[]; source: string; finished_deliverable_expected?: boolean }>("/api/skills/ground-truth", {
           action_description: actionDescription,
           customer_data: set.customer.slice(0, MAX_CHARS),
           reference_data: set.reference.slice(0, MAX_CHARS),
           answer_key: set.answerKey
         }).then(async (r) => {
           const fmt = await contractP;
-          // With a contract, format is scored on the contract only; the set's own items keep the substance.
+          // With a contract, format is scored on the contract only; the set's own items keep the substance. When the
+          // rules say this case must stop (e.g. a price is missing), there is no finished deliverable to check the format of.
           const issues: Issue[] = fmt.length
             ? [
                 ...r.issues.filter((i) => i.kind === "correctness"),
-                ...fmt.map((f) => ({ id: f.id, description: f.description, kind: "format" as const, check: f.check }))
+                ...(r.finished_deliverable_expected === false
+                  ? []
+                  : fmt.map((f) => ({ id: f.id, description: f.description, kind: "format" as const, check: f.check })))
               ]
             : r.issues;
           return { setId: set.id, issues };

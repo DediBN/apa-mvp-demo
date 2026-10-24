@@ -36,10 +36,12 @@ Then concise Markdown instructions that a capable model follows on the business'
   Markdown table with named columns); if it checks things, exceptions first with the evidence row, then a short
   summary of what checked out
 - resolving the data before stopping: read the whole thread — a later message updates an earlier one; obvious
-  variants of a catalog name (plural, spelling, a descriptive word added) are the same item; one order to one address
-  is one delivery. Ask only about what the data truly leaves open, never guess a missing price or fact
-- stop only where the business's rules say to stop, and only for the part affected: complete everything that can be
-  completed and list each pending point clearly
+  variants of a catalog name (plural, spelling, a descriptive word added) are the same item; a charge applies exactly
+  as the rule defines it ("per order" means once per order, however many addresses or deliveries). Ask only about
+  what the data truly leaves open, never guess a missing price or fact
+- stopping: follow the business's stop rules literally. If a rule says to stop (e.g. an item is not in the price
+  list), do not produce a partial deliverable with totals — say clearly what is needed to continue and list exactly
+  what is missing. Where no rule says to stop, complete the work and list any open point
 - no scripts, no code to execute, no network access, no external tools
 
 Write for the process described, not a generic template. Keep it under 900 words. No preamble, no code fences around the file.`;
