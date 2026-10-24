@@ -373,8 +373,24 @@ export function SkillEvaluationCenter({ status, ajd, candidates, onEvaluationDon
   const baselineScore = judge?.scores.find((s) => s.key === "skill_baseline_none");
   const winner = ranked.find((s) => s.key !== "skill_baseline_none");
   const winnerBeatsBaseline = Boolean(winner && (!baselineScore || winner.composite > baselineScore.composite));
-  // Best measured skill; if no skill was scored, fall back to one we can still package (custom first).
-  const recommendedScore = ranked.find((sc) => sc.key !== "skill_baseline_none");
+  // Recommendation: only skills that fit the task are eligible (the custom skill, or a directory skill that passed
+  // screening). A weak-fit skill can score well because the task and data were detailed enough, not because of the
+  // skill, so it is never recommended. Ties go to the custom skill (it carries the business's own rules), then to
+  // the better screening fit.
+  const laneFor = (key: string) => lanes.find((l) => l.candidate.candidate_id === key);
+  const isEligible = (key: string) => {
+    const lane = laneFor(key);
+    if (!lane || key === "skill_baseline_none") return false;
+    return lane.kind === "custom" || (lane.candidate.fit_score_pre_eval ?? 0) >= 40;
+  };
+  const recommendedScore = [...ranked]
+    .filter((sc) => isEligible(sc.key))
+    .sort(
+      (a, b) =>
+        b.composite - a.composite ||
+        Number(laneFor(b.key)?.kind === "custom") - Number(laneFor(a.key)?.kind === "custom") ||
+        (laneFor(b.key)?.candidate.fit_score_pre_eval ?? 0) - (laneFor(a.key)?.candidate.fit_score_pre_eval ?? 0)
+    )[0];
   const recommendedLane =
     lanes.find((l) => l.candidate.candidate_id === recommendedScore?.key && l.skillMd) ??
     lanes.find((l) => l.kind === "custom" && l.skillMd) ??
