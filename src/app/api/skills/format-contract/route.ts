@@ -89,7 +89,7 @@ export async function POST(request: Request) {
       2000,
       SCHEMA
     );
-    const requirements: FormatRequirement[] = (result.requirements ?? [])
+    const requirements: FormatRequirement[] = (Array.isArray(result.requirements) ? result.requirements : [])
       .filter((r) => r?.description?.trim())
       .slice(0, 8)
       .map((r, i) => ({ id: `F${i + 1}`, description: r.description.trim(), check: cleanCheck(r.check) }));
@@ -97,6 +97,7 @@ export async function POST(request: Request) {
     return NextResponse.json({ requirements });
   } catch (error) {
     console.error("[skills/format-contract]", error instanceof Error ? error.message : error);
-    return NextResponse.json({ error: "Could not define the output format. Please run again." }, { status: 500 });
+    const detail = error instanceof Error ? error.message.slice(0, 160) : "unknown";
+    return NextResponse.json({ error: `Could not define the output format (${detail}). Please run again.` }, { status: 500 });
   }
 }

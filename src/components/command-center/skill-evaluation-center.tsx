@@ -179,9 +179,13 @@ export function SkillEvaluationCenter({ status, ajd, candidates, onEvaluationDon
     };
     // The format contract is fixed first, from the Skill Spec alone (no skill, no output): the custom skill carries it
     // and every test set is scored on it, so "format" means the business's own format, the same way every time.
-    const contractP = postJson<{ requirements: FormatRequirement[] }>("/api/skills/format-contract", ajdBody)
-      .then((r) => r.requirements)
-      .catch(() => [] as FormatRequirement[]);
+    const fetchContract = () => postJson<{ requirements: FormatRequirement[] }>("/api/skills/format-contract", ajdBody).then((r) => r.requirements);
+    const contractP = fetchContract()
+      .catch(fetchContract)
+      .catch(() => {
+        addLog("Could not set the required output format — format is scored on the test sets' own items this time.");
+        return [] as FormatRequirement[];
+      });
 
     // 1. Test sets: the user's data, or scenarios generated from the AJD (generator never sees any skill).
     let sets: Array<{ id: string; label: string; customer: string; reference: string; answerKey?: string }>;
