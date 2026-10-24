@@ -639,7 +639,7 @@ export function SkillEvaluationCenter({ status, ajd, candidates, onEvaluationDon
                 <p className="mt-1 text-command-muted">
                   {winner.name}: correctness {winner.correctness}
                   {range(winner) ? ` (runs ${range(winner)})` : ""} vs {baselineScore?.correctness}
-                  {baselineScore && range(baselineScore) ? ` (${range(baselineScore)})` : ""} — the results overlap, so the gap is within run-to-run noise.
+                  {baselineScore && range(baselineScore) ? ` (${range(baselineScore)})` : ""}{(winner.runs ?? 1) > 1 ? " — the ranges overlap, so the gap is within run-to-run noise." : " — with a single run, a gap under 10 points is within run-to-run noise. Use 3 runs for a firmer answer."}
                   {winner.format !== null && baselineScore?.format !== null && (winner.format ?? 0) - (baselineScore?.format ?? 0) >= 10
                     ? ` The skill did follow the required format better (${winner.format}% vs ${baselineScore?.format}%).`
                     : ""}

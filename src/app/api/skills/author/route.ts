@@ -27,11 +27,18 @@ description: <one sentence: what it does and when Claude should use it>
 ---
 
 Then concise Markdown instructions that a capable model follows on the business's own data:
-- the exact checks to perform, in order, with the comparison rules (tolerances, matching keys, what counts as a duplicate)
-- how to present results: exceptions first, each with the evidence row/line, then a short summary of what checked out
-- what to do when data is missing or ambiguous: say so, never guess
+- the business's own rules, stated exactly (prices, thresholds, rates, terms) — never add rules, fields, clauses or
+  defaults the business did not ask for
+- the steps in order, with the comparison and calculation rules (tolerances, matching keys, rounding, what counts as a duplicate)
+- the output: if the process produces something (a quote, a reply, a report), the exact form it must take (e.g. a
+  Markdown table with named columns); if it checks things, exceptions first with the evidence row, then a short
+  summary of what checked out
+- resolving the data before stopping: read the whole thread — a later message updates an earlier one; obvious
+  variants of a catalog name (plural, spelling, a descriptive word added) are the same item; one order to one address
+  is one delivery. Ask only about what the data truly leaves open, never guess a missing price or fact
+- stop only where the business's rules say to stop, and only for the part affected: complete everything that can be
+  completed and list each pending point clearly
 - no scripts, no code to execute, no network access, no external tools
-- keep the requested output focused: the most important findings first, no exhaustive line-by-line commentary
 
 Write for the process described, not a generic template. Keep it under 900 words. No preamble, no code fences around the file.`;
 
