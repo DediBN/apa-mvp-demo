@@ -18,7 +18,9 @@ interface Request_ {
 const SYSTEM = `You define the output format a business wants for one recurring deliverable, as a short checklist.
 
 Write 5 to 8 atomic format requirements — each one checks a single thing about how the deliverable looks, never
-whether its numbers or facts are right. Start from what the business said (language, table, sections, terms). Where
+whether its numbers or facts are right. Every requirement must apply to EVERY deliverable of this kind: no conditional
+rules ("if an item is missing…", "when the customer asks…") — those are business rules, not format, and are tested
+elsewhere. Start from what the business said (language, table, sections, terms). Where
 it is silent, fill in the standard professional layout for this kind of document in this market, so the format is
 complete enough to be applied the same way every time. Nothing that depends on data the business may not have
 (no registration numbers, signatures or logos).
