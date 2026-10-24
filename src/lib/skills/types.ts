@@ -13,6 +13,12 @@ export interface OptionScore {
   grounding: number;
   composite: number;
   verdict: string;
+  // Technology evaluation v2: correctness and format scored separately, over repeated runs.
+  correctness?: number;
+  correctness_min?: number;
+  correctness_max?: number;
+  format?: number | null;
+  runs?: number;
 }
 
 export interface JudgeResponse {

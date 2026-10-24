@@ -170,7 +170,14 @@ export async function POST(request: Request) {
       try {
         screening = await claudeJson<ScreeningResult>(
           "You are a strict hiring screener for Claude Agent Skills. Judge each SKILL.md only by what it actually instructs, " +
-            "against the job description. A generic or loosely related skill must score low. Do not reward popularity.",
+            "against the job description. Do not reward popularity, general writing quality or broad 'productivity' skills.\n" +
+            "Score the fit with these anchors:\n" +
+            "- 80-100: the skill's core purpose IS this task, in this kind of business (its steps produce this exact output).\n" +
+            "- 60-79: same task type, needs minor adaptation (e.g. same document type, different industry).\n" +
+            "- 40-59: covers a real part of the task (a sub-step or the output format), not the whole task.\n" +
+            "- 10-39: shares words or a general area only (e.g. cloud-service pricing for a furniture price quote; a generic writing or editing skill for a calculation task).\n" +
+            "- 0-9: unrelated.\n" +
+            "A skill that depends on tools, APIs or data sources the business does not have scores at most 30.",
           `JOB DESCRIPTION\njob_title: ${jobTitle}\nmission: ${mission}\nkpis: ${JSON.stringify(body.kpis ?? [])}\n\n` +
             `CANDIDATE SKILLS\n${dossier}\n\n` +
             'Return {"results":[{"index":0,"fit_score":0-100,"fit_reason":"one line, concrete","gaps":"one line: what the job needs that this skill does not cover"}]} for every candidate.',
