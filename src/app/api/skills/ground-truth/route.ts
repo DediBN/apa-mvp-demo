@@ -30,8 +30,9 @@ Tag each item:
 - "format": only how the result is presented — layout, table, ordering, tone, length, language.
 Give ids I1, I2, ...
 
-Also say whether the correct outcome is a finished deliverable (finished_deliverable_expected: true), or whether the
-business's rules require stopping, refusing or asking first, so no finished deliverable should be produced (false).`;
+Also say whether the correct outcome includes at least one finished deliverable (finished_deliverable_expected: true),
+or whether the business's rules require stopping, refusing or asking for everything in this data, so no finished
+deliverable at all should be produced (false).`;
 
 export async function POST(request: Request) {
   try {

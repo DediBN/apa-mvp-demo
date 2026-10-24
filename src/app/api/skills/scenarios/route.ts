@@ -25,6 +25,8 @@ const SYSTEM = `You design test scenarios for evaluating AI skills on a business
 For each scenario produce realistic sample data the business would actually have (rows of records, messages, invoices, logs —
 whatever the task works on), in the same language as the business need, plus optional reference data the task checks against
 (price list, catalog, policy) when the task implies one.
+customer_data is ONLY what arrives from outside (the customer's message, the incoming records) — never the business's
+own price list, rules, policy or instructions. Those go in reference_data only.
 
 Then write the answer_key: one checkable expected outcome per line.
 - For tasks that find or check things (reconciliation, anomalies, compliance, triage): plant a known set of issues and list
