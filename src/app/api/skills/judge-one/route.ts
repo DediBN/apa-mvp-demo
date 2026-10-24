@@ -46,8 +46,21 @@ export async function POST(request: Request) {
       SYSTEM,
       `TASK\n${body.action_description ?? ""}\n\nDATA\n"""${body.customer_data.slice(0, MAX)}"""\n\nREFERENCE\n"""${(body.reference_data || "(none)").slice(0, MAX)}"""\n\n` +
         `GROUND TRUTH\n${issues.map((i) => `${i.id} [${i.kind}] ${i.description}`).join("\n")}\n\nRUN\n${run}\n\n` +
-        'Return {"found":["I1"],"false_flags":[{"item":"","why":""}],"unsupported":0,"verdict":""}',
-      2000
+        "Submit found, false_flags, unsupported and verdict.",
+      2000,
+      {
+        type: "object",
+        properties: {
+          found: { type: "array", items: { type: "string" }, description: "Ground-truth ids the run got right" },
+          false_flags: {
+            type: "array",
+            items: { type: "object", properties: { item: { type: "string" }, why: { type: "string" } }, required: ["item", "why"] }
+          },
+          unsupported: { type: "integer", minimum: 0 },
+          verdict: { type: "string" }
+        },
+        required: ["found", "false_flags", "unsupported", "verdict"]
+      }
     );
     const ids = new Set(issues.map((i) => i.id));
     return NextResponse.json({

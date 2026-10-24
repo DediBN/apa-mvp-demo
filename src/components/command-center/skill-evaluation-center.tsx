@@ -123,6 +123,7 @@ export function SkillEvaluationCenter({ status, ajd, candidates, onEvaluationDon
   const [error, setError] = useState<string | null>(null);
   const [openKey, setOpenKey] = useState<string | null>(null);
   const [repeats, setRepeats] = useState(3);
+  const [unscoredRuns, setUnscoredRuns] = useState(0);
 
   const visible = status.state === "EVALUATING" || status.state === "COMPLETE" || status.state === "SCORECARD";
 
@@ -161,6 +162,7 @@ export function SkillEvaluationCenter({ status, ajd, candidates, onEvaluationDon
     }
     setError(null);
     setJudge(null);
+    setUnscoredRuns(0);
     setOpenKey(null);
     setLanes(plannedLanes);
 
@@ -304,21 +306,29 @@ export function SkillEvaluationCenter({ status, ajd, candidates, onEvaluationDon
           .filter((r) => r.result)
           .map((r) => async () => {
             const set = sets.find((s) => s.id === r.setId)!;
-            try {
-              const j = await postJson<RunJudgement & { verdict: string }>("/api/skills/judge-one", {
-                action_description: actionDescription,
-                customer_data: set.customer.slice(0, MAX_CHARS),
-                reference_data: set.reference.slice(0, MAX_CHARS),
-                issues: truthBySet.get(r.setId) ?? [],
-                output: { summary: r.result?.summary, items: r.result?.items ?? [] }
-              });
-              return { ...r, judgement: j };
-            } catch {
-              return { ...r, judgement: null };
+            const body = {
+              action_description: actionDescription,
+              customer_data: set.customer.slice(0, MAX_CHARS),
+              reference_data: set.reference.slice(0, MAX_CHARS),
+              issues: truthBySet.get(r.setId) ?? [],
+              output: { summary: r.result?.summary, items: r.result?.items ?? [] }
+            };
+            // A failed judgement is retried once, and never counted as a zero.
+            for (let attempt = 0; attempt < 2; attempt += 1) {
+              try {
+                const j = await postJson<RunJudgement & { verdict: string }>("/api/skills/judge-one", body);
+                return { ...r, judgement: j };
+              } catch {
+                if (attempt === 0) await new Promise((res) => setTimeout(res, 2000));
+              }
             }
+            return { ...r, judgement: null };
           }),
-        10
+        6
       );
+      const unscored = judgements.filter((j) => !j.judgement).length;
+      if (unscored > 0) addLog(`${unscored} run(s) could not be scored and were left out — they are not counted as zero.`);
+      setUnscoredRuns(unscored);
 
       const multi = sets.length > 1;
       const prefix = (setId: string, id: string) => (multi ? `${setId}·${id}` : id);
@@ -329,17 +339,16 @@ export function SkillEvaluationCenter({ status, ajd, candidates, onEvaluationDon
       const scores: OptionScore[] = [];
       for (const lane of finished.filter((l) => l.result)) {
         const id = lane.candidate.candidate_id;
-        const mine = judgements.filter((j) => j.laneId === id && j.judgement);
-        const repScores = reps
-          .map((rep) => {
-            const perSet = mine.filter((j) => j.rep === rep);
-            if (perSet.length === 0) return null;
-            return scoreRun(
-              issues,
-              perSet.map((j) => ({ ...j.judgement!, found: j.judgement!.found.map((f) => prefix(j.setId, f)) }))
-            );
-          })
-          .filter((s): s is NonNullable<typeof s> => Boolean(s));
+        const judgedAll = judgements.filter((j) => j.laneId === id && j.judgement);
+        // Score a repetition only when every test set in it was judged; a partial one would read as misses.
+        const completeReps = reps.filter((rep) => judgedAll.filter((j) => j.rep === rep).length >= sets.length);
+        const mine = judgedAll.filter((j) => completeReps.includes(j.rep));
+        const repScores = completeReps.map((rep) =>
+          scoreRun(
+            issues,
+            mine.filter((j) => j.rep === rep).map((j) => ({ ...j.judgement!, found: j.judgement!.found.map((f) => prefix(j.setId, f)) }))
+          )
+        );
         if (repScores.length === 0) continue;
         const corr = spread(repScores.map((s) => s.correctness));
         const fmtValues = repScores.map((s) => s.format).filter((f): f is number => f !== null);
@@ -348,7 +357,7 @@ export function SkillEvaluationCenter({ status, ajd, candidates, onEvaluationDon
         const foundCount = new Map<string, number>();
         mine.forEach((j) => j.judgement!.found.forEach((f) => foundCount.set(prefix(j.setId, f), (foundCount.get(prefix(j.setId, f)) ?? 0) + 1)));
         const found = issues.map((i) => i.id).filter((iid) => (foundCount.get(iid) ?? 0) * 2 >= repScores.length && (foundCount.get(iid) ?? 0) > 0);
-        const first = mine.filter((j) => j.rep === 0);
+        const first = mine.filter((j) => j.rep === completeReps[0]);
         scores.push({
           key: id,
           name: lane.candidate.name,
@@ -445,7 +454,10 @@ export function SkillEvaluationCenter({ status, ajd, candidates, onEvaluationDon
     lanes.find((l) => l.candidate.candidate_id === recommendedScore?.key && l.skillMd) ??
     lanes.find((l) => l.kind === "custom" && l.skillMd) ??
     lanes.find((l) => l.kind === "directory" && l.skillMd && (l.candidate.fit_score_pre_eval ?? 0) >= 40);
-  const failedLanes = lanes.filter((lane) => lane.state === "error" || (lane.kind !== "baseline" && !lane.result));
+  // Options that failed to run, or ran but could not be scored, are listed — never silently dropped.
+  const failedLanes = lanes
+    .filter((lane) => lane.state === "error" || !lane.result || (judge && !judge.scores.some((sc) => sc.key === lane.candidate.candidate_id)))
+    .map((lane) => (lane.state !== "error" && lane.result ? { ...lane, error: "ran, but scoring failed — press Run again" } : lane));
   const directoryCandidateCount = candidates.filter((c) => laneKind(c) === "directory" && c.skill?.content?.trim()).length;
   const issueText = (id: string) => judge?.issues.find((i) => i.id === id)?.description ?? id;
 
@@ -641,7 +653,11 @@ export function SkillEvaluationCenter({ status, ajd, candidates, onEvaluationDon
               </div>
             ) : (
               <p className="text-sm text-command-text">
-                Claude with no skill scored highest on this test. The best skill is still offered below (Step 04) if you want this process built into Claude.
+                <span className="font-semibold text-amber-400">Claude with no skill did better on this test</span> — correctness{" "}
+                {baselineScore?.correctness}
+                {baselineScore && range(baselineScore) ? ` (runs ${range(baselineScore)})` : ""} vs {winner.correctness}
+                {range(winner) ? ` (runs ${range(winner)})` : ""} for the best skill, {winner.name}. A skill is not needed for correctness here;
+                it is offered in Step 04 only if you want this process written down and applied the same way every time.
               </p>
             )}
             <p className="mt-1 font-mono text-[11px] text-command-muted">
@@ -651,6 +667,11 @@ export function SkillEvaluationCenter({ status, ajd, candidates, onEvaluationDon
                   ? `${scenarios.length} generated scenarios with planted answer keys (synthetic — confirm on real data before relying on it)`
                   : "independent audit of the data (indicative)"} · {judge.issues.length} issues
             </p>
+            {unscoredRuns > 0 && (
+              <p className="mt-1 font-mono text-[11px] text-amber-400">
+                {unscoredRuns} run(s) could not be scored and were left out of the averages (not counted as zero).
+              </p>
+            )}
           </div>
 
           {judge.ground_truth === "generated_scenarios" && scenarios.length > 0 && (
@@ -699,7 +720,7 @@ export function SkillEvaluationCenter({ status, ajd, candidates, onEvaluationDon
                     <td className="py-2 pr-2 text-command-muted">{i + 1}</td>
                     <td className="py-2 pr-2">
                       <span className="font-sans text-sm font-semibold">{s.name}</span>
-                      {s.key === rec?.key ? <span className="ml-2 text-command-action">★ recommended</span> : null}
+                      {s.key === rec?.key ? <span className="ml-2 text-command-action">{winnerBeatsBaseline || inNoise ? "★ recommended" : "★ best skill"}</span> : null}
                     </td>
                     <td className="py-2 pr-2">
                       {laneFor(s.key)?.kind === "directory" ? (
@@ -713,7 +734,7 @@ export function SkillEvaluationCenter({ status, ajd, candidates, onEvaluationDon
                     </td>
                     <td className={`py-2 pr-2 text-sm font-semibold ${scoreTone(s.correctness ?? s.composite)}`}>
                       {s.correctness ?? s.composite}
-                      {range(s) ? <span className="ml-1 text-[10px] font-normal text-command-muted">{range(s)}</span> : null}
+                      {range(s) ? <span className="ml-1 text-[10px] font-normal text-command-muted">({range(s)})</span> : null}
                     </td>
                     <td className={`py-2 pr-2 ${s.format === null || s.format === undefined ? "text-command-muted" : scoreTone(s.format)}`}>
                       {s.format === null || s.format === undefined ? "—" : `${s.format}%`}

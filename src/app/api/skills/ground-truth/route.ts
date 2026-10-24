@@ -40,8 +40,26 @@ export async function POST(request: Request) {
       SYSTEM,
       `TASK\n${body.action_description ?? ""}\n\nDATA\n"""${body.customer_data.slice(0, MAX)}"""\n\nREFERENCE\n"""${(body.reference_data || "(none)").slice(0, MAX)}"""\n\n` +
         (body.answer_key?.trim() ? `ANSWER KEY\n"""${body.answer_key.slice(0, 6000)}"""\n\n` : "") +
-        'Return {"issues":[{"id":"I1","description":"","kind":"correctness"}]}',
-      3000
+        "Submit the ground-truth items.",
+      4000,
+      {
+        type: "object",
+        properties: {
+          issues: {
+            type: "array",
+            items: {
+              type: "object",
+              properties: {
+                id: { type: "string" },
+                description: { type: "string" },
+                kind: { type: "string", enum: ["correctness", "format"] }
+              },
+              required: ["id", "description", "kind"]
+            }
+          }
+        },
+        required: ["issues"]
+      }
     );
     const issues = (result.issues ?? [])
       .filter((i) => i.description?.trim())
