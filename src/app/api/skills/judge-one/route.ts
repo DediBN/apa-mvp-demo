@@ -78,7 +78,8 @@ export async function POST(request: Request) {
       false_flags: (result.false_flags ?? []).filter((f) => f?.item?.trim()),
       unsupported: Math.min(items.length, Math.max(0, Number(result.unsupported) || 0)),
       total_items: items.length,
-      verdict: result.verdict?.trim() || "",
+      // Strip any markup the model leaked into the text (e.g. a stray closing tag).
+      verdict: (result.verdict ?? "").replace(/<\/?[a-z_]+[^>]*>/gi, "").trim(),
       model: JUDGE_MODEL
     });
   } catch (error) {

@@ -283,7 +283,7 @@ export function SourcingRadar({ status, ajd, onShortlistReady, onFail, addLog }:
                   <p className="mt-2 font-mono text-xs text-command-muted">
                     {candidate.source === "Custom Skill"
                       ? "Tested in Step 03"
-                      : `Screening fit ${candidate.fit_score_pre_eval}${candidate.fit_score_pre_eval < 40 ? " · weak — tested, not recommended" : ""} · tested in Step 03`}
+                      : `Screening fit ${candidate.fit_score_pre_eval}${candidate.fit_score_pre_eval < 40 ? " · weak fit — tested for comparison, never recommended" : " · tested in Step 03"}`}
                   </p>
                   <p className="mt-2 text-xs text-command-muted">{candidate.reason_codes[0]}</p>
                   {candidate.reason_codes[1] ? (

@@ -156,8 +156,20 @@ export async function POST(req: NextRequest) {
 
     const toolBlock = response.content.find((block) => block.type === "tool_use");
     const toolInput = toolBlock && toolBlock.type === "tool_use" ? (toolBlock.input as { items?: unknown; summary?: string; deliverable?: string }) : null;
-    if (toolInput && Array.isArray(toolInput.items) && response.stop_reason !== "max_tokens") {
-      return NextResponse.json({ items: toolInput.items, summary: toolInput.summary ?? "", deliverable: toolInput.deliverable?.trim() || undefined });
+    // Models occasionally return the array as a JSON-encoded string inside the tool input; accept that too.
+    let toolItems: unknown = toolInput?.items;
+    if (typeof toolItems === "string") {
+      try {
+        toolItems = JSON.parse(toolItems);
+      } catch {
+        toolItems = null;
+      }
+    }
+    if (toolInput && Array.isArray(toolItems) && response.stop_reason !== "max_tokens") {
+      return NextResponse.json({ items: toolItems, summary: toolInput.summary ?? "", deliverable: toolInput.deliverable?.trim() || undefined });
+    }
+    if (toolInput) {
+      console.error("[concierge-demo] unusable tool output", { stop_reason: response.stop_reason, itemsType: typeof toolInput.items });
     }
 
     const rawText = response.content

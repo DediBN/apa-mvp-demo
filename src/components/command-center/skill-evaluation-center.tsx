@@ -253,18 +253,24 @@ export function SkillEvaluationCenter({ status, ajd, candidates, onEvaluationDon
       runnable.flatMap((lane) =>
         sets.flatMap((set) =>
           reps.map((rep) => async () => {
-            try {
-              const result = await postJson<RunResult>("/api/concierge-demo", {
-                action_description: actionDescription,
-                customer_data: set.customer.slice(0, MAX_CHARS),
-                reference_data: set.reference.slice(0, MAX_CHARS),
-                skill_md: skillByLane.get(lane.candidate.candidate_id),
-                skill_name: lane.kind === "baseline" ? undefined : lane.candidate.name
-              });
-              return { laneId: lane.candidate.candidate_id, setId: set.id, rep, result };
-            } catch (e) {
-              return { laneId: lane.candidate.candidate_id, setId: set.id, rep, error: e instanceof Error ? e.message : "Run failed" };
+            const body = {
+              action_description: actionDescription,
+              customer_data: set.customer.slice(0, MAX_CHARS),
+              reference_data: set.reference.slice(0, MAX_CHARS),
+              skill_md: skillByLane.get(lane.candidate.candidate_id),
+              skill_name: lane.kind === "baseline" ? undefined : lane.candidate.name
+            };
+            // One retry: a single transient failure should not knock a run out of the comparison.
+            let lastError = "Run failed";
+            for (let attempt = 0; attempt < 2; attempt += 1) {
+              try {
+                const result = await postJson<RunResult>("/api/concierge-demo", body);
+                return { laneId: lane.candidate.candidate_id, setId: set.id, rep, result };
+              } catch (e) {
+                lastError = e instanceof Error ? e.message : "Run failed";
+              }
             }
+            return { laneId: lane.candidate.candidate_id, setId: set.id, rep, error: lastError };
           })
         )
       ),

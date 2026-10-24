@@ -98,7 +98,7 @@ function customSkillCandidate(jobTitle: string): Candidate {
     name: `Custom skill: ${jobTitle}`,
     source: "Custom Skill",
     fit_score_pre_eval: 70,
-    reason_codes: ["Written from the approved Skill Spec — fits the process exactly", "Fallback when no directory skill passes screening"],
+    reason_codes: ["Written from the approved Skill Spec — your process, your rules", "Always tested alongside the directory skills"],
     risk_flags: ["Not yet written — must be authored and tested before deployment"],
     skill: { directory: "Custom", author: "APA" }
   };
