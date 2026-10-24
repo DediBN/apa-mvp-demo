@@ -4,6 +4,7 @@
 import { NextResponse } from "next/server";
 import { JUDGE_MODEL, pinnedJson } from "../../../../lib/skills/pinned-json";
 import type { Issue } from "../../../../lib/skills/tech-scoring";
+import { hasMarkdownTable, TABLE_WORDS } from "../../../../lib/business/scoring";
 
 export const maxDuration = 120;
 export const dynamic = "force-dynamic";
@@ -13,7 +14,7 @@ interface Request_ {
   customer_data?: string;
   reference_data?: string;
   issues?: Issue[];
-  output?: { summary?: string; items: Array<{ label: string; detail: string; reliability: string; reason?: string }> };
+  output?: { summary?: string; deliverable?: string; items: Array<{ label: string; detail: string; reliability: string; reason?: string }> };
 }
 
 const MAX = 18000;
@@ -22,7 +23,8 @@ const SYSTEM = `You are an independent auditor checking one AI run on a business
 
 - found: ids of ground-truth items the run clearly got right (the same record and the same problem, or the
   requirement clearly met). Partial or vague mentions do not count. A format item counts only if the run's
-  result really has that form (text that merely says "table" is not a table).
+  result really has that form (text that merely says "table" is not a table). The DELIVERABLE is what would be
+  handed over; judge format items on it.
 - false_flags: items where the run flagged a problem that is not real, or asserted something wrong about the data.
 - unsupported: number of result items stating facts or numbers that do not appear in or follow from the data.
 - verdict: one plain sentence.
@@ -41,7 +43,8 @@ export async function POST(request: Request) {
       items
         .slice(0, 40)
         .map((it, i) => `${i + 1}. [${it.reliability}] ${it.label} — ${it.detail}${it.reason ? ` (${it.reason})` : ""}`)
-        .join("\n");
+        .join("\n") +
+      (body.output?.deliverable?.trim() ? `\n\nDELIVERABLE (exactly as handed over)\n"""${body.output.deliverable.slice(0, MAX)}"""` : "\n\nDELIVERABLE: none produced");
     const result = await pinnedJson<{ found: string[]; false_flags: Array<{ item: string; why: string }>; unsupported: number; verdict: string }>(
       SYSTEM,
       `TASK\n${body.action_description ?? ""}\n\nDATA\n"""${body.customer_data.slice(0, MAX)}"""\n\nREFERENCE\n"""${(body.reference_data || "(none)").slice(0, MAX)}"""\n\n` +
@@ -63,8 +66,15 @@ export async function POST(request: Request) {
       }
     );
     const ids = new Set(issues.map((i) => i.id));
+    const found = new Set((result.found ?? []).filter((id) => ids.has(id)));
+    // Deterministic check: a format item that requires a table cannot be met without a real Markdown table
+    // in the deliverable (the judge still decides whether an existing table meets the rest of the item).
+    const deliverable = body.output?.deliverable ?? "";
+    if (!hasMarkdownTable(deliverable)) {
+      for (const issue of issues) if (issue.kind === "format" && TABLE_WORDS.test(issue.description)) found.delete(issue.id);
+    }
     return NextResponse.json({
-      found: Array.from(new Set((result.found ?? []).filter((id) => ids.has(id)))),
+      found: Array.from(found),
       false_flags: (result.false_flags ?? []).filter((f) => f?.item?.trim()),
       unsupported: Math.min(items.length, Math.max(0, Number(result.unsupported) || 0)),
       total_items: items.length,

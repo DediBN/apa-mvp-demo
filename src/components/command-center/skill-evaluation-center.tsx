@@ -11,6 +11,7 @@ import { buildZip, skillFolderName } from "../../lib/skills/zip";
 import { StatusPill } from "../ui/status-pill";
 import { pool, scoreRun, spread, withinNoise, type Issue, type RunJudgement } from "../../lib/skills/tech-scoring";
 import { recommend, type OptionResult } from "../../lib/business/scoring";
+import { Markdown } from "../business/markdown";
 
 // Step 03 in skill mode: every option runs the real task on the customer's real data, then one judge scores all
 // outputs against the same ground truth. No simulated scenarios, no formula-generated parameters.
@@ -25,7 +26,7 @@ interface SkillEvaluationCenterProps {
 
 type ReliabilityTag = "found_in_data" | "inferred" | "needs_approval" | "missing_info" | "cannot_demonstrate";
 type ResultItem = { label: string; detail: string; reliability: ReliabilityTag; reason?: string };
-type RunResult = { items: ResultItem[]; summary: string };
+type RunResult = { items: ResultItem[]; summary: string; deliverable?: string };
 
 type LaneState = "queued" | "authoring" | "running" | "done" | "error";
 
@@ -283,7 +284,12 @@ export function SkillEvaluationCenter({ status, ajd, candidates, onEvaluationDon
       }
       const merged: RunResult = {
         summary: ok.map((r) => `${sets.length > 1 ? `[${r.setId}] ` : ""}${r.result?.summary ?? ""}`).join("\n"),
-        items: ok.flatMap((r) => (r.result?.items ?? []).map((it) => (sets.length > 1 ? { ...it, label: `[${r.setId}] ${it.label}` } : it)))
+        items: ok.flatMap((r) => (r.result?.items ?? []).map((it) => (sets.length > 1 ? { ...it, label: `[${r.setId}] ${it.label}` } : it))),
+        deliverable:
+          ok
+            .filter((r) => r.result?.deliverable?.trim())
+            .map((r) => `${sets.length > 1 ? `### ${r.setId}\n\n` : ""}${r.result!.deliverable!.trim()}`)
+            .join("\n\n") || undefined
       };
       updateLane(id, { state: "done", result: merged, skillMd });
       return { ...lane, skillMd, state: "done", result: merged };
@@ -311,7 +317,7 @@ export function SkillEvaluationCenter({ status, ajd, candidates, onEvaluationDon
               customer_data: set.customer.slice(0, MAX_CHARS),
               reference_data: set.reference.slice(0, MAX_CHARS),
               issues: truthBySet.get(r.setId) ?? [],
-              output: { summary: r.result?.summary, items: r.result?.items ?? [] }
+              output: { summary: r.result?.summary, items: r.result?.items ?? [], deliverable: r.result?.deliverable }
             };
             // A failed judgement is retried once, and never counted as a zero.
             for (let attempt = 0; attempt < 2; attempt += 1) {
@@ -590,7 +596,7 @@ export function SkillEvaluationCenter({ status, ajd, candidates, onEvaluationDon
             <div key={lane.candidate.candidate_id} className="command-card flex items-center justify-between gap-3 p-3">
               <div>
                 <p className="text-sm font-semibold text-command-text">{lane.candidate.name}</p>
-                <p className="font-mono text-[10px] uppercase tracking-[0.14em] text-command-muted">{lane.candidate.source}</p>
+                <p className="font-mono text-[10px] uppercase tracking-[0.14em] text-command-muted">{lane.kind === "baseline" ? "No skill" : lane.candidate.source}</p>
               </div>
               <span
                 className={`font-mono text-xs ${
@@ -761,7 +767,7 @@ export function SkillEvaluationCenter({ status, ajd, candidates, onEvaluationDon
                 ))}
               </tbody>
             </table>
-            <p className="mt-2 font-mono text-[10px] text-command-muted">Correctness = 60% recall + 30% precision + 10% grounding, on correctness items only; format is scored separately. Each output judged blind, on its own, by one fixed model. Small numbers = range over runs. Recommendation: custom skill or a directory skill with fit ≥ 40; ties go to the custom skill. Click a row for details.</p>
+            <p className="mt-2 font-mono text-[10px] text-command-muted">Correctness = 60% recall + 30% precision + 10% grounding, on correctness items only; format is scored separately. Each output judged blind, on its own, by one fixed model. Numbers in brackets = lowest–highest over runs. Recommendation: custom skill or a directory skill with fit ≥ 40; ties go to the custom skill. Click a row for details.</p>
           </div>
 
           {(() => {
@@ -789,8 +795,18 @@ export function SkillEvaluationCenter({ status, ajd, candidates, onEvaluationDon
                     ))}
                   </div>
                 )}
-                <details open>
-                  <summary className="cursor-pointer font-mono text-[11px] uppercase tracking-[0.14em] text-command-muted">Output ({lane.result?.items.length ?? 0} items)</summary>
+                {lane.result?.deliverable ? (
+                  <div>
+                    <p className="font-mono text-[11px] uppercase tracking-[0.14em] text-command-muted">What it produced (first run)</p>
+                    <div dir="auto" className="mt-2 max-h-[28rem] overflow-auto rounded border border-command-border bg-command-bg/60 p-3 font-sans text-sm text-command-text">
+                      <Markdown text={lane.result.deliverable} />
+                    </div>
+                  </div>
+                ) : null}
+                <details open={!lane.result?.deliverable}>
+                  <summary className="cursor-pointer font-mono text-[11px] uppercase tracking-[0.14em] text-command-muted">
+                    {lane.result?.deliverable ? "Checks and open points" : "Output"} ({lane.result?.items.length ?? 0} items)
+                  </summary>
                   <div className="mt-2 space-y-2">
                     {lane.result?.items.map((item, i) => {
                       const meta = TAG_META[item.reliability] ?? TAG_META.cannot_demonstrate;
@@ -843,14 +859,14 @@ export function SkillEvaluationCenter({ status, ajd, candidates, onEvaluationDon
             <p className="font-mono text-xs uppercase tracking-[0.18em] text-command-muted">Step 04 · Install in Claude</p>
             {recommendedLane ? (
               <>
-                <p className="mt-2 text-lg font-semibold text-command-text">Recommended skill: {recommendedLane.candidate.name}</p>
+                <p className="mt-2 text-lg font-semibold text-command-text">{winnerBeatsBaseline ? "Recommended skill" : "Best skill (optional)"}: {recommendedLane.candidate.name}</p>
                 <p className="mt-1 text-sm text-command-muted">
                   {recommendedScore && baselineScore
                     ? winnerBeatsBaseline
                       ? `Correctness ${recommendedScore.correctness} vs ${baselineScore.correctness} for Claude with no skill — a clear gain on this test.`
                       : inNoise
-                        ? `Correctness ${recommendedScore.correctness} vs ${baselineScore.correctness} for Claude with no skill — within run-to-run noise. The skill's value here is applying your process the same way every time${(recommendedScore.format ?? 0) - (baselineScore.format ?? 0) >= 10 ? " and in your format" : ""}.`
-                        : `Correctness ${recommendedScore.correctness} vs ${baselineScore.correctness} for Claude with no skill. Claude alone did as well or better on this test; the skill's value is applying your process the same way every time.`
+                        ? `Correctness ${recommendedScore.correctness} vs ${baselineScore.correctness} for Claude with no skill — within run-to-run noise. ${recommendedLane.kind === "custom" ? "The skill's value here is applying your process the same way every time" : "Installing it is optional — it did not measurably improve the result"}${(recommendedScore.format ?? 0) - (baselineScore.format ?? 0) >= 10 ? ", though it followed your format better" : ""}.`
+                        : `Correctness ${recommendedScore.correctness} vs ${baselineScore.correctness} for Claude with no skill. Claude alone did better on this test, so a skill is not needed for correctness${recommendedLane.kind === "custom" ? "; install it only if you want your process written down and applied the same way every time" : ""}.`
                     : recommendedScore
                       ? `Correctness ${recommendedScore.correctness}.`
                       : "Not scored in this run — it is recommended because it was written for this exact process. Run again to measure it."}

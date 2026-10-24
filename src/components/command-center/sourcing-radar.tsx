@@ -276,11 +276,15 @@ export function SourcingRadar({ status, ajd, onShortlistReady, onFail, addLog }:
                   <div className="flex items-center justify-between gap-2">
                     <h3 className="text-sm font-semibold text-command-text">{candidate.name}</h3>
                     <span className={`rounded-full border px-2 py-1 font-mono text-[10px] uppercase tracking-[0.14em] ${sourceTone(candidate.source)}`}>
-                      {candidate.source}
+                      {candidate.candidate_id === "skill_baseline_none" ? "No skill" : candidate.source}
                     </span>
                   </div>
 
-                  <p className="mt-2 font-mono text-xs text-command-muted">Score available after evaluation</p>
+                  <p className="mt-2 font-mono text-xs text-command-muted">
+                    {candidate.source === "Custom Skill"
+                      ? "Tested in Step 03"
+                      : `Screening fit ${candidate.fit_score_pre_eval}${candidate.fit_score_pre_eval < 40 ? " · weak — tested, not recommended" : ""} · tested in Step 03`}
+                  </p>
                   <p className="mt-2 text-xs text-command-muted">{candidate.reason_codes[0]}</p>
                   {candidate.reason_codes[1] ? (
                     <p className="mt-1 font-mono text-[10px] text-command-muted">{candidate.reason_codes[1]}</p>
