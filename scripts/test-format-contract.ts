@@ -55,4 +55,19 @@ test("checkContract leaves requirements without a check to the judge", () => {
   assert.match(contractSection(contract), /1\. table\n2\. polite closing line/);
 });
 
+test("a label check confirms but never fails: an equivalent wording goes to the judge", () => {
+  const contract: FormatRequirement[] = [
+    { id: "F1", description: "grand total line", check: { type: "contains_any", phrases: ['סה"כ לתשלום'] } },
+    { id: "F2", description: "table", check: { type: "markdown_table" } }
+  ];
+  const r = checkContract(contract, "סכום סופי לתשלום: 8,366.20 ש״ח, בלי טבלה");
+  assert.equal(r.has("F1"), false); // undecided -> judge
+  assert.equal(r.get("F2"), false); // structure decides
+});
+
+test("the skill section names the exact labels", () => {
+  const sec = contractSection([{ id: "F1", description: "columns", check: { type: "table_columns", names: ["פריט", "כמות"] } }]);
+  assert.match(sec, /column headers exactly: פריט \| כמות/);
+});
+
 console.log(`${passed} tests passed`);

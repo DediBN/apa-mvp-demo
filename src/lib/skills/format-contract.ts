@@ -1,8 +1,9 @@
 // The format contract: the exact form the deliverable must take, fixed once from the Skill Spec and shared by
 // every test set. Pure functions only (no imports from Next), so it can be unit-tested with plain Node.
 //
-// Each requirement is atomic. Where a requirement can be checked mechanically it carries a `check`, and that check
-// decides the verdict — the judge model is only used for requirements without one.
+// Each requirement is atomic. Structural checks (a real table, the language) decide the verdict both ways. Label checks
+// (column names, required lines) can only confirm: a pass counts as met, a miss goes to the judge, who accepts an
+// equivalent wording ("סכום סופי לתשלום" for "סה״כ לתשלום") — a literal phrase list must never fail a correct result.
 
 export type FormatCheck =
   | { type: "markdown_table" }
@@ -71,10 +72,16 @@ export function runCheck(check: FormatCheck, deliverable: string): boolean {
   }
 }
 
-// Ids of the contract requirements the deliverable meets by mechanical check; `undefined` for those without a check.
+export const isDecisive = (check: FormatCheck) => check.type === "markdown_table" || check.type === "hebrew_text";
+
+// Mechanical verdicts: true = met, false = not met; absent = for the judge to decide.
 export function checkContract(contract: FormatRequirement[], deliverable: string): Map<string, boolean> {
   const out = new Map<string, boolean>();
-  for (const req of contract) if (req.check) out.set(req.id, runCheck(req.check, deliverable));
+  for (const req of contract) {
+    if (!req.check) continue;
+    const ok = runCheck(req.check, deliverable);
+    if (ok || isDecisive(req.check)) out.set(req.id, ok);
+  }
   return out;
 }
 
@@ -83,7 +90,17 @@ export function contractSection(contract: FormatRequirement[]): string {
   return (
     "## Required output format (follow exactly)\n\n" +
     "Write the finished deliverable in Markdown and meet every point below:\n\n" +
-    contract.map((r, i) => `${i + 1}. ${r.description}`).join("\n") +
+    contract
+      .map((r, i) => {
+        const exact =
+          r.check?.type === "table_columns"
+            ? ` — column headers exactly: ${r.check.names.join(" | ")}`
+            : r.check?.type === "contains_any"
+              ? ` — use the label: “${r.check.phrases[0]}”`
+              : "";
+        return `${i + 1}. ${r.description}${exact}`;
+      })
+      .join("\n") +
     "\n"
   );
 }

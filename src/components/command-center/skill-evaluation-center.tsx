@@ -69,6 +69,16 @@ function buildActionDescription(ajd: AJD): string {
     .join("\n");
 }
 
+// What an employee actually types, day to day: the task, without restating the business's rules. This is what every
+// option receives in the realistic test — the rules have to come from the skill, which is the point of installing one.
+function buildEverydayRequest(ajd: AJD): string {
+  return [
+    `Task: ${ajd.job_title}.`,
+    "Handle the request in the data below and produce the finished result, ready to send.",
+    "Write it in the language of the data."
+  ].join("\n");
+}
+
 async function postJson<T>(url: string, body: unknown): Promise<T> {
   const res = await fetch(url, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
   const data = await res.json().catch(() => ({}));
@@ -127,6 +137,9 @@ export function SkillEvaluationCenter({ status, ajd, candidates, onEvaluationDon
   const [repeats, setRepeats] = useState(3);
   const [unscoredRuns, setUnscoredRuns] = useState(0);
   const [contract, setContract] = useState<FormatRequirement[]>([]);
+  // "everyday": options get the short request an employee would type; "full": every run gets the whole Skill Spec.
+  const [requestMode, setRequestMode] = useState<"everyday" | "full">("everyday");
+  const [ranWith, setRanWith] = useState<"everyday" | "full">("everyday");
 
   const visible = status.state === "EVALUATING" || status.state === "COMPLETE" || status.state === "SCORECARD";
 
@@ -171,6 +184,8 @@ export function SkillEvaluationCenter({ status, ajd, candidates, onEvaluationDon
     setLanes(plannedLanes);
 
     const actionDescription = buildActionDescription(ajd);
+    const everydayRequest = buildEverydayRequest(ajd);
+    setRanWith(requestMode);
     const ajdBody = {
       job_title: ajd.job_title,
       business_need: ajd.business_need,
@@ -276,7 +291,7 @@ export function SkillEvaluationCenter({ status, ajd, candidates, onEvaluationDon
         sets.flatMap((set) =>
           reps.map((rep) => async () => {
             const body = {
-              action_description: actionDescription,
+              action_description: requestMode === "everyday" ? everydayRequest : actionDescription,
               customer_data: set.customer.slice(0, MAX_CHARS),
               reference_data: set.reference.slice(0, MAX_CHARS),
               skill_md: skillByLane.get(lane.candidate.candidate_id),
@@ -593,6 +608,20 @@ export function SkillEvaluationCenter({ status, ajd, candidates, onEvaluationDon
                 </select>
               </label>
 
+              <fieldset className="space-y-1 text-sm text-command-text">
+                <legend className="mb-1 font-mono text-[11px] uppercase tracking-[0.14em] text-command-muted">What each option is asked</legend>
+                <label className="flex items-start gap-2">
+                  <input type="radio" className="mt-1" checked={requestMode === "everyday"} onChange={() => setRequestMode("everyday")} />
+                  <span>
+                    The everyday request (realistic) — the task only, the way an employee asks. Your rules must come from the skill.
+                  </span>
+                </label>
+                <label className="flex items-start gap-2">
+                  <input type="radio" className="mt-1" checked={requestMode === "full"} onChange={() => setRequestMode("full")} />
+                  <span>Full instructions every time — every option, including Claude alone, gets your whole Skill Spec.</span>
+                </label>
+              </fieldset>
+
               <div className="rounded border border-command-border/60 p-2 font-mono text-[11px] text-command-muted">
                 Options to run ({plannedLanes.length}):
                 {plannedLanes.map((lane) => (
@@ -701,6 +730,11 @@ export function SkillEvaluationCenter({ status, ajd, candidates, onEvaluationDon
                 : judge.ground_truth === "generated_scenarios"
                   ? `${scenarios.length} generated scenarios with planted answer keys (synthetic — confirm on real data before relying on it)`
                   : "independent audit of the data (indicative)"} · {judge.issues.length} issues
+            </p>
+            <p className="mt-1 font-mono text-[11px] text-command-muted">
+              Asked: {ranWith === "everyday"
+                ? "the everyday request only — your rules were not repeated to any option; a skill had to supply them"
+                : "your full Skill Spec on every run — shows what Claude can do when you spell everything out each time"}
             </p>
             {unscoredRuns > 0 && (
               <p className="mt-1 font-mono text-[11px] text-amber-400">
