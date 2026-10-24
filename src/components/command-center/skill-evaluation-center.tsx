@@ -12,6 +12,7 @@ import { StatusPill } from "../ui/status-pill";
 import { pool, scoreRun, spread, withinNoise, type Issue, type RunJudgement } from "../../lib/skills/tech-scoring";
 import { recommend, type OptionResult } from "../../lib/business/scoring";
 import { Markdown } from "../business/markdown";
+import type { FormatRequirement } from "../../lib/skills/format-contract";
 
 // Step 03 in skill mode: every option runs the real task on the customer's real data, then one judge scores all
 // outputs against the same ground truth. No simulated scenarios, no formula-generated parameters.
@@ -125,6 +126,7 @@ export function SkillEvaluationCenter({ status, ajd, candidates, onEvaluationDon
   const [openKey, setOpenKey] = useState<string | null>(null);
   const [repeats, setRepeats] = useState(3);
   const [unscoredRuns, setUnscoredRuns] = useState(0);
+  const [contract, setContract] = useState<FormatRequirement[]>([]);
 
   const visible = status.state === "EVALUATING" || status.state === "COMPLETE" || status.state === "SCORECARD";
 
@@ -164,6 +166,7 @@ export function SkillEvaluationCenter({ status, ajd, candidates, onEvaluationDon
     setError(null);
     setJudge(null);
     setUnscoredRuns(0);
+    setContract([]);
     setOpenKey(null);
     setLanes(plannedLanes);
 
@@ -174,6 +177,11 @@ export function SkillEvaluationCenter({ status, ajd, candidates, onEvaluationDon
       mission: ajd.agent_profile?.mission,
       kpis: ajd.agent_profile?.kpis
     };
+    // The format contract is fixed first, from the Skill Spec alone (no skill, no output): the custom skill carries it
+    // and every test set is scored on it, so "format" means the business's own format, the same way every time.
+    const contractP = postJson<{ requirements: FormatRequirement[] }>("/api/skills/format-contract", ajdBody)
+      .then((r) => r.requirements)
+      .catch(() => [] as FormatRequirement[]);
 
     // 1. Test sets: the user's data, or scenarios generated from the AJD (generator never sees any skill).
     let sets: Array<{ id: string; label: string; customer: string; reference: string; answerKey?: string }>;
@@ -224,7 +232,7 @@ export function SkillEvaluationCenter({ status, ajd, candidates, onEvaluationDon
       const id = customLane.candidate.candidate_id;
       updateLane(id, { state: "authoring" });
       try {
-        const authored = await postJson<{ skill_md: string; name: string }>("/api/skills/author", ajdBody);
+        const authored = await postJson<{ skill_md: string; name: string }>("/api/skills/author", { ...ajdBody, format_contract: await contractP });
         skillByLane.set(id, authored.skill_md);
         updateLane(id, { skillMd: authored.skill_md, state: "queued" });
         addLog(`Custom skill written from the Skill Spec: ${authored.name}`);
@@ -241,7 +249,17 @@ export function SkillEvaluationCenter({ status, ajd, candidates, onEvaluationDon
           customer_data: set.customer.slice(0, MAX_CHARS),
           reference_data: set.reference.slice(0, MAX_CHARS),
           answer_key: set.answerKey
-        }).then((r) => ({ setId: set.id, issues: r.issues }))
+        }).then(async (r) => {
+          const fmt = await contractP;
+          // With a contract, format is scored on the contract only; the set's own items keep the substance.
+          const issues: Issue[] = fmt.length
+            ? [
+                ...r.issues.filter((i) => i.kind === "correctness"),
+                ...fmt.map((f) => ({ id: f.id, description: f.description, kind: "format" as const, check: f.check }))
+              ]
+            : r.issues;
+          return { setId: set.id, issues };
+        })
       )
     );
 
@@ -312,6 +330,7 @@ export function SkillEvaluationCenter({ status, ajd, candidates, onEvaluationDon
     addLog(`All runs finished. Scoring each of ${runs.filter((r) => r.result).length} runs blind against a fixed ground truth.`);
     try {
       const truths = await truthP;
+      setContract(await contractP);
       const truthBySet = new Map(truths.map((t) => [t.setId, t.issues]));
       const judgements = await pool(
         runs
@@ -704,6 +723,26 @@ export function SkillEvaluationCenter({ status, ajd, candidates, onEvaluationDon
                   </div>
                 ))}
               </div>
+            </details>
+          )}
+
+          {contract.length > 0 && (
+            <details className="command-card p-3">
+              <summary className="cursor-pointer font-mono text-[11px] uppercase tracking-[0.14em] text-command-muted">
+                Required output format ({contract.length} checks — the format score)
+              </summary>
+              <p className="mt-2 text-xs text-command-muted">
+                Set once from the Skill Spec, before any option ran. The custom skill carries it word for word; every option is scored on it.
+                Checks marked “auto” are verified mechanically, not by a model.
+              </p>
+              <ol className="mt-2 list-decimal space-y-1 ps-5 text-sm text-command-text" dir="auto">
+                {contract.map((r) => (
+                  <li key={r.id}>
+                    {r.description}
+                    {r.check ? <span className="ms-2 font-mono text-[10px] uppercase text-command-action">auto</span> : null}
+                  </li>
+                ))}
+              </ol>
             </details>
           )}
 

@@ -5,6 +5,7 @@ import { NextResponse } from "next/server";
 import { JUDGE_MODEL, pinnedJson } from "../../../../lib/skills/pinned-json";
 import type { Issue } from "../../../../lib/skills/tech-scoring";
 import { hasMarkdownTable, TABLE_WORDS } from "../../../../lib/business/scoring";
+import { runCheck } from "../../../../lib/skills/format-contract";
 
 export const maxDuration = 120;
 export const dynamic = "force-dynamic";
@@ -71,7 +72,14 @@ export async function POST(request: Request) {
     // in the deliverable (the judge still decides whether an existing table meets the rest of the item).
     const deliverable = body.output?.deliverable ?? "";
     if (!hasMarkdownTable(deliverable)) {
-      for (const issue of issues) if (issue.kind === "format" && TABLE_WORDS.test(issue.description)) found.delete(issue.id);
+      for (const issue of issues) if (issue.kind === "format" && !issue.check && TABLE_WORDS.test(issue.description)) found.delete(issue.id);
+    }
+    // Format requirements with a mechanical check are decided by the check alone, never by the model.
+    for (const issue of issues) {
+      if (issue.check) {
+        if (runCheck(issue.check, deliverable)) found.add(issue.id);
+        else found.delete(issue.id);
+      }
     }
     return NextResponse.json({
       found: Array.from(found),

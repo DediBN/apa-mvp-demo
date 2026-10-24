@@ -2,6 +2,7 @@
 
 import { NextResponse } from "next/server";
 import { createAnthropicClient } from "../../../../lib/anthropic-client";
+import { contractSection, type FormatRequirement } from "../../../../lib/skills/format-contract";
 
 // Needs Vercel Fluid compute (Hobby max 300s). Long documents + a skill exceed 60s.
 export const maxDuration = 300;
@@ -12,6 +13,7 @@ interface AuthorRequest {
   business_need?: string;
   mission?: string;
   kpis?: Array<{ name: string; target: string }>;
+  format_contract?: FormatRequirement[];
 }
 
 const MODEL_CHAIN = [process.env.APA_SKILLS_MODEL?.trim(), "claude-sonnet-5-5", "claude-sonnet-5", "claude-sonnet-4-6"].filter(
@@ -49,11 +51,16 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: "job_title, business_need or mission is required" }, { status: 400 });
     }
 
+    const contract = (body.format_contract ?? []).filter((r) => r?.description?.trim()).slice(0, 8);
     const user =
       `job_title: ${body.job_title ?? ""}\n` +
       `business_need: ${body.business_need ?? ""}\n` +
       `mission: ${body.mission ?? ""}\n` +
-      `kpis: ${JSON.stringify(body.kpis ?? [])}`;
+      `kpis: ${JSON.stringify(body.kpis ?? [])}` +
+      (contract.length
+        ? `\n\nREQUIRED OUTPUT FORMAT (appended to the skill verbatim after your text — do not restate it, do not contradict it):\n` +
+          contract.map((r, i) => `${i + 1}. ${r.description}`).join("\n")
+        : "");
 
     const anthropic = createAnthropicClient();
     let lastError: unknown;
@@ -81,7 +88,9 @@ export async function POST(request: Request) {
             ? raw.slice(fmStart)
             : `---\nname: ${fallbackName}\ndescription: ${(body.mission || body.business_need || body.job_title || "").replace(/\s+/g, " ").slice(0, 200)}\n---\n\n${raw}`;
         const name = text.match(/^name:\s*(.+)$/m)?.[1]?.trim() || fallbackName;
-        return NextResponse.json({ skill_md: text, name });
+        // The format contract goes in verbatim, so the skill carries the business's exact format.
+        const skillMd = contract.length ? `${text.trimEnd()}\n\n${contractSection(contract)}` : text;
+        return NextResponse.json({ skill_md: skillMd, name });
       } catch (error) {
         lastError = error;
       }
