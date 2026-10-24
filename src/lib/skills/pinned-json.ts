@@ -6,6 +6,26 @@ import { extractJsonObject } from "./claude-json";
 export const JUDGE_MODEL = process.env.APA_JUDGE_MODEL?.trim() || process.env.APA_SKILLS_MODEL?.trim() || "claude-sonnet-5";
 
 const ATTEMPTS = 3;
+
+// Models occasionally return an array or object field as a JSON-encoded string inside the tool input. Parse those back.
+function unstringify(input: unknown): unknown {
+  if (!input || typeof input !== "object" || Array.isArray(input)) return input;
+  const out: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(input as Record<string, unknown>)) {
+    if (typeof value === "string" && /^\s*[[{]/.test(value)) {
+      try {
+        const parsed = JSON.parse(value);
+        // Sometimes the whole answer is nested under its own key again: {"items": "{\"items\": [...]}"}.
+        out[key] = parsed && typeof parsed === "object" && !Array.isArray(parsed) && key in parsed ? parsed[key] : parsed;
+        continue;
+      } catch {
+        // keep the string as is
+      }
+    }
+    out[key] = value;
+  }
+  return out;
+}
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 // The answer comes back as a forced tool call against a JSON schema, so the model never hand-writes JSON
@@ -28,7 +48,7 @@ export async function pinnedJson<T>(system: string, user: string, maxTokens = 20
         });
         const block = response.content.find((b) => b.type === "tool_use");
         if (!block || block.type !== "tool_use") throw new Error("No structured result returned");
-        return block.input as T;
+        return unstringify(block.input) as T;
       }
       const response = await anthropic.messages.create({
         model: JUDGE_MODEL,

@@ -3,12 +3,15 @@
 // Ground truth is fixed once per test set (answer key or independent audit), each issue tagged as correctness or
 // format. Every run is judged on its own, blind. Scores are computed here from counts, never asked from the model.
 
+import type { FormatCheck } from "./format-contract";
+
 export type IssueKind = "correctness" | "format";
 
 export interface Issue {
   id: string;
   description: string;
   kind: IssueKind;
+  check?: FormatCheck; // mechanical check for a format requirement; when present it decides the verdict
 }
 
 export interface RunJudgement {

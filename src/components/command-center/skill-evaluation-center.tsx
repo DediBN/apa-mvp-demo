@@ -12,6 +12,7 @@ import { StatusPill } from "../ui/status-pill";
 import { pool, scoreRun, spread, withinNoise, type Issue, type RunJudgement } from "../../lib/skills/tech-scoring";
 import { recommend, type OptionResult } from "../../lib/business/scoring";
 import { Markdown } from "../business/markdown";
+import type { FormatRequirement } from "../../lib/skills/format-contract";
 
 // Step 03 in skill mode: every option runs the real task on the customer's real data, then one judge scores all
 // outputs against the same ground truth. No simulated scenarios, no formula-generated parameters.
@@ -66,6 +67,16 @@ function buildActionDescription(ajd: AJD): string {
   ]
     .filter(Boolean)
     .join("\n");
+}
+
+// What an employee actually types, day to day: the task, without restating the business's rules. This is what every
+// option receives in the realistic test — the rules have to come from the skill, which is the point of installing one.
+function buildEverydayRequest(ajd: AJD): string {
+  return [
+    `Task: ${ajd.job_title}.`,
+    "Handle the request in the data below and produce the finished result, ready to send.",
+    "Write it in the language of the data."
+  ].join("\n");
 }
 
 async function postJson<T>(url: string, body: unknown): Promise<T> {
@@ -125,6 +136,10 @@ export function SkillEvaluationCenter({ status, ajd, candidates, onEvaluationDon
   const [openKey, setOpenKey] = useState<string | null>(null);
   const [repeats, setRepeats] = useState(3);
   const [unscoredRuns, setUnscoredRuns] = useState(0);
+  const [contract, setContract] = useState<FormatRequirement[]>([]);
+  // "everyday": options get the short request an employee would type; "full": every run gets the whole Skill Spec.
+  const [requestMode, setRequestMode] = useState<"everyday" | "full">("everyday");
+  const [ranWith, setRanWith] = useState<"everyday" | "full">("everyday");
 
   const visible = status.state === "EVALUATING" || status.state === "COMPLETE" || status.state === "SCORECARD";
 
@@ -164,16 +179,28 @@ export function SkillEvaluationCenter({ status, ajd, candidates, onEvaluationDon
     setError(null);
     setJudge(null);
     setUnscoredRuns(0);
+    setContract([]);
     setOpenKey(null);
     setLanes(plannedLanes);
 
     const actionDescription = buildActionDescription(ajd);
+    const everydayRequest = buildEverydayRequest(ajd);
+    setRanWith(requestMode);
     const ajdBody = {
       job_title: ajd.job_title,
       business_need: ajd.business_need,
       mission: ajd.agent_profile?.mission,
       kpis: ajd.agent_profile?.kpis
     };
+    // The format contract is fixed first, from the Skill Spec alone (no skill, no output): the custom skill carries it
+    // and every test set is scored on it, so "format" means the business's own format, the same way every time.
+    const fetchContract = () => postJson<{ requirements: FormatRequirement[] }>("/api/skills/format-contract", ajdBody).then((r) => r.requirements);
+    const contractP = fetchContract()
+      .catch(fetchContract)
+      .catch(() => {
+        addLog("Could not set the required output format — format is scored on the test sets' own items this time.");
+        return [] as FormatRequirement[];
+      });
 
     // 1. Test sets: the user's data, or scenarios generated from the AJD (generator never sees any skill).
     let sets: Array<{ id: string; label: string; customer: string; reference: string; answerKey?: string }>;
@@ -224,7 +251,7 @@ export function SkillEvaluationCenter({ status, ajd, candidates, onEvaluationDon
       const id = customLane.candidate.candidate_id;
       updateLane(id, { state: "authoring" });
       try {
-        const authored = await postJson<{ skill_md: string; name: string }>("/api/skills/author", ajdBody);
+        const authored = await postJson<{ skill_md: string; name: string }>("/api/skills/author", { ...ajdBody, format_contract: await contractP });
         skillByLane.set(id, authored.skill_md);
         updateLane(id, { skillMd: authored.skill_md, state: "queued" });
         addLog(`Custom skill written from the Skill Spec: ${authored.name}`);
@@ -236,12 +263,25 @@ export function SkillEvaluationCenter({ status, ajd, candidates, onEvaluationDon
     // 3. Ground truth is fixed once per test set, before any output exists (and in parallel with the runs).
     const truthP = Promise.all(
       sets.map((set) =>
-        postJson<{ issues: Issue[]; source: string }>("/api/skills/ground-truth", {
+        postJson<{ issues: Issue[]; source: string; finished_deliverable_expected?: boolean }>("/api/skills/ground-truth", {
           action_description: actionDescription,
           customer_data: set.customer.slice(0, MAX_CHARS),
           reference_data: set.reference.slice(0, MAX_CHARS),
           answer_key: set.answerKey
-        }).then((r) => ({ setId: set.id, issues: r.issues }))
+        }).then(async (r) => {
+          const fmt = await contractP;
+          // With a contract, format is scored on the contract only; the set's own items keep the substance. When the
+          // rules say this case must stop (e.g. a price is missing), there is no finished deliverable to check the format of.
+          const issues: Issue[] = fmt.length
+            ? [
+                ...r.issues.filter((i) => i.kind === "correctness"),
+                ...(r.finished_deliverable_expected === false
+                  ? []
+                  : fmt.map((f) => ({ id: f.id, description: f.description, kind: "format" as const, check: f.check })))
+              ]
+            : r.issues;
+          return { setId: set.id, issues };
+        })
       )
     );
 
@@ -254,9 +294,11 @@ export function SkillEvaluationCenter({ status, ajd, candidates, onEvaluationDon
         sets.flatMap((set) =>
           reps.map((rep) => async () => {
             const body = {
-              action_description: actionDescription,
+              action_description: requestMode === "everyday" ? everydayRequest : actionDescription,
               customer_data: set.customer.slice(0, MAX_CHARS),
-              reference_data: set.reference.slice(0, MAX_CHARS),
+              // Everyday test on generated scenarios: only the customer's request, as it arrives. The business's own
+              // prices and rules are not handed over — knowing them is the skill's job. (Your own uploaded reference is kept.)
+              reference_data: requestMode === "everyday" && mode === "scenarios" ? "" : set.reference.slice(0, MAX_CHARS),
               skill_md: skillByLane.get(lane.candidate.candidate_id),
               skill_name: lane.kind === "baseline" ? undefined : lane.candidate.name
             };
@@ -312,6 +354,7 @@ export function SkillEvaluationCenter({ status, ajd, candidates, onEvaluationDon
     addLog(`All runs finished. Scoring each of ${runs.filter((r) => r.result).length} runs blind against a fixed ground truth.`);
     try {
       const truths = await truthP;
+      setContract(await contractP);
       const truthBySet = new Map(truths.map((t) => [t.setId, t.issues]));
       const judgements = await pool(
         runs
@@ -570,6 +613,21 @@ export function SkillEvaluationCenter({ status, ajd, candidates, onEvaluationDon
                 </select>
               </label>
 
+              <fieldset className="space-y-1 text-sm text-command-text">
+                <legend className="mb-1 font-mono text-[11px] uppercase tracking-[0.14em] text-command-muted">What each option is asked</legend>
+                <label className="flex items-start gap-2">
+                  <input type="radio" className="mt-1" checked={requestMode === "everyday"} onChange={() => setRequestMode("everyday")} />
+                  <span>
+                    The everyday request (realistic) — the task and the customer&apos;s message, the way an employee asks. Your prices and rules
+                    must come from the skill.
+                  </span>
+                </label>
+                <label className="flex items-start gap-2">
+                  <input type="radio" className="mt-1" checked={requestMode === "full"} onChange={() => setRequestMode("full")} />
+                  <span>Full instructions every time — every option, including Claude alone, gets your whole Skill Spec.</span>
+                </label>
+              </fieldset>
+
               <div className="rounded border border-command-border/60 p-2 font-mono text-[11px] text-command-muted">
                 Options to run ({plannedLanes.length}):
                 {plannedLanes.map((lane) => (
@@ -679,6 +737,13 @@ export function SkillEvaluationCenter({ status, ajd, candidates, onEvaluationDon
                   ? `${scenarios.length} generated scenarios with planted answer keys (synthetic — confirm on real data before relying on it)`
                   : "independent audit of the data (indicative)"} · {judge.issues.length} issues
             </p>
+            <p className="mt-1 font-mono text-[11px] text-command-muted">
+              Asked: {ranWith === "everyday"
+                ? mode === "scenarios"
+                  ? "the everyday request and the customer's message only — your prices and rules were not handed to any option; a skill had to supply them"
+                  : "the everyday request and your data — your rules were not repeated to any option; a skill had to supply them"
+                : "your full Skill Spec on every run — shows what Claude can do when you spell everything out each time"}
+            </p>
             {unscoredRuns > 0 && (
               <p className="mt-1 font-mono text-[11px] text-amber-400">
                 {unscoredRuns} run(s) could not be scored and were left out of the averages (not counted as zero).
@@ -704,6 +769,26 @@ export function SkillEvaluationCenter({ status, ajd, candidates, onEvaluationDon
                   </div>
                 ))}
               </div>
+            </details>
+          )}
+
+          {contract.length > 0 && (
+            <details className="command-card p-3">
+              <summary className="cursor-pointer font-mono text-[11px] uppercase tracking-[0.14em] text-command-muted">
+                Required output format ({contract.length} checks — the format score)
+              </summary>
+              <p className="mt-2 text-xs text-command-muted">
+                Set once from the Skill Spec, before any option ran. The custom skill carries it word for word; every option is scored on it.
+                Checks marked “auto” are verified mechanically, not by a model.
+              </p>
+              <ol className="mt-2 list-decimal space-y-1 ps-5 text-sm text-command-text" dir="auto">
+                {contract.map((r) => (
+                  <li key={r.id}>
+                    {r.description}
+                    {r.check ? <span className="ms-2 font-mono text-[10px] uppercase text-command-action">auto</span> : null}
+                  </li>
+                ))}
+              </ol>
             </details>
           )}
 

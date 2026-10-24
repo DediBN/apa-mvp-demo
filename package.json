@@ -9,7 +9,7 @@
     "lint": "next lint",
     "typecheck": "tsc --noEmit",
     "test:business": "node --experimental-strip-types scripts/test-business-scoring.ts",
-    "test:tech": "node --experimental-strip-types scripts/test-tech-scoring.ts"
+    "test:tech": "node --experimental-strip-types scripts/test-tech-scoring.ts && node --experimental-strip-types scripts/test-format-contract.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.82.0",

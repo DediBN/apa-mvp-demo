@@ -5,6 +5,7 @@ import { NextResponse } from "next/server";
 import { JUDGE_MODEL, pinnedJson } from "../../../../lib/skills/pinned-json";
 import type { Issue } from "../../../../lib/skills/tech-scoring";
 import { hasMarkdownTable, TABLE_WORDS } from "../../../../lib/business/scoring";
+import { checkContract } from "../../../../lib/skills/format-contract";
 
 export const maxDuration = 120;
 export const dynamic = "force-dynamic";
@@ -24,7 +25,8 @@ const SYSTEM = `You are an independent auditor checking one AI run on a business
 - found: ids of ground-truth items the run clearly got right (the same record and the same problem, or the
   requirement clearly met). Partial or vague mentions do not count. A format item counts only if the run's
   result really has that form (text that merely says "table" is not a table). The DELIVERABLE is what would be
-  handed over; judge format items on it.
+  handed over; judge format items on it. For a format item, an equivalent label or wording meets it
+  ("סכום סופי לתשלום" meets "סה״כ לתשלום"); what matters is that the element is there, clearly.
 - false_flags: items where the run flagged a problem that is not real, or asserted something wrong about the data.
 - unsupported: number of result items stating facts or numbers that do not appear in or follow from the data.
 - verdict: one plain sentence.
@@ -71,7 +73,16 @@ export async function POST(request: Request) {
     // in the deliverable (the judge still decides whether an existing table meets the rest of the item).
     const deliverable = body.output?.deliverable ?? "";
     if (!hasMarkdownTable(deliverable)) {
-      for (const issue of issues) if (issue.kind === "format" && TABLE_WORDS.test(issue.description)) found.delete(issue.id);
+      for (const issue of issues) if (issue.kind === "format" && !issue.check && TABLE_WORDS.test(issue.description)) found.delete(issue.id);
+    }
+    // Mechanical format checks: structure decides both ways; a label check can only confirm (a miss stays with the judge).
+    const mechanical = checkContract(
+      issues.filter((i) => i.check).map((i) => ({ id: i.id, description: i.description, check: i.check })),
+      deliverable
+    );
+    for (const [id, ok] of Array.from(mechanical.entries())) {
+      if (ok) found.add(id);
+      else found.delete(id);
     }
     return NextResponse.json({
       found: Array.from(found),

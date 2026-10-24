@@ -25,6 +25,8 @@ const SYSTEM = `You design test scenarios for evaluating AI skills on a business
 For each scenario produce realistic sample data the business would actually have (rows of records, messages, invoices, logs —
 whatever the task works on), in the same language as the business need, plus optional reference data the task checks against
 (price list, catalog, policy) when the task implies one.
+customer_data is ONLY what arrives from outside (the customer's message, the incoming records) — never the business's
+own price list, rules, policy or instructions. Those go in reference_data only.
 
 Then write the answer_key: one checkable expected outcome per line.
 - For tasks that find or check things (reconciliation, anomalies, compliance, triage): plant a known set of issues and list
@@ -35,7 +37,9 @@ Then write the answer_key: one checkable expected outcome per line.
   easy-to-miss requirement.
 The answer key applies the business's own stated rules literally: where the need says to stop, refuse or ask (for
 example when a price is missing), the expected outcome is to stop, refuse or ask as stated — never a guessed or
-partial completion the rules do not allow. Do not add requirements the business need does not state or clearly imply
+partial completion the rules do not allow. When a stop rule applies to a case, the expected outcome for that case
+is the stop itself — which items are missing, what to ask for, and that nothing is invented — never totals or a
+finished deliverable for that case. Every scenario must still have at least one case where nothing triggers a stop. Do not add requirements the business need does not state or clearly imply
 (no extra fields, validity dates, legal clauses or wording preferences of your own).
 Scenarios must differ from each other in format and difficulty. Keep each customer_data under 3500 characters.`;
 

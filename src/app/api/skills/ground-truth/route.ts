@@ -28,7 +28,11 @@ Tag each item:
 - "correctness": the substance must be right — a record, number, amount, condition, rule applied, something to
   flag, refuse or ask for.
 - "format": only how the result is presented — layout, table, ordering, tone, length, language.
-Give ids I1, I2, ...`;
+Give ids I1, I2, ...
+
+Also say whether the correct outcome includes at least one finished deliverable (finished_deliverable_expected: true),
+or whether the business's rules require stopping, refusing or asking for everything in this data, so no finished
+deliverable at all should be produced (false).`;
 
 export async function POST(request: Request) {
   try {
@@ -36,7 +40,7 @@ export async function POST(request: Request) {
     if (!body.customer_data) {
       return NextResponse.json({ error: "customer_data is required" }, { status: 400 });
     }
-    const result = await pinnedJson<{ issues: Issue[] }>(
+    const result = await pinnedJson<{ issues: Issue[]; finished_deliverable_expected?: boolean }>(
       SYSTEM,
       `TASK\n${body.action_description ?? ""}\n\nDATA\n"""${body.customer_data.slice(0, MAX)}"""\n\nREFERENCE\n"""${(body.reference_data || "(none)").slice(0, MAX)}"""\n\n` +
         (body.answer_key?.trim() ? `ANSWER KEY\n"""${body.answer_key.slice(0, 6000)}"""\n\n` : "") +
@@ -56,9 +60,10 @@ export async function POST(request: Request) {
               },
               required: ["id", "description", "kind"]
             }
-          }
+          },
+          finished_deliverable_expected: { type: "boolean" }
         },
-        required: ["issues"]
+        required: ["issues", "finished_deliverable_expected"]
       }
     );
     const issues = (result.issues ?? [])
@@ -66,7 +71,7 @@ export async function POST(request: Request) {
       .slice(0, 40)
       .map((i, n) => ({ id: `I${n + 1}`, description: i.description.trim(), kind: i.kind === "format" ? "format" : "correctness" }));
     if (issues.length === 0) throw new Error("No ground truth items");
-    return NextResponse.json({ issues, source: body.answer_key?.trim() ? "answer_key" : "independent_audit", model: JUDGE_MODEL });
+    return NextResponse.json({ issues, finished_deliverable_expected: result.finished_deliverable_expected !== false, source: body.answer_key?.trim() ? "answer_key" : "independent_audit", model: JUDGE_MODEL });
   } catch (error) {
     console.error("[skills/ground-truth]", error instanceof Error ? error.message : error);
     return NextResponse.json({ error: "Could not set the ground truth for this test. Please run again." }, { status: 500 });
