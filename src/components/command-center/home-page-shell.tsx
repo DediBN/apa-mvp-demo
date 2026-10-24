@@ -72,7 +72,7 @@ function HomePageContent() {
 export function HomePageShell() {
   return (
     <LangProvider>
-      <UIModeProvider initialMode="business">
+      <UIModeProvider initialMode="technology">
         <HomePageContent />
       </UIModeProvider>
     </LangProvider>

@@ -33,6 +33,10 @@ Then write the answer_key: one checkable expected outcome per line.
 - For tasks that produce things (drafting, summarizing, planning, classifying): list each concrete requirement a good
   output must meet given this input (facts it must include, rules it must follow, mistakes it must avoid), including one
   easy-to-miss requirement.
+The answer key applies the business's own stated rules literally: where the need says to stop, refuse or ask (for
+example when a price is missing), the expected outcome is to stop, refuse or ask as stated — never a guessed or
+partial completion the rules do not allow. Do not add requirements the business need does not state or clearly imply
+(no extra fields, validity dates, legal clauses or wording preferences of your own).
 Scenarios must differ from each other in format and difficulty. Keep each customer_data under 3500 characters.`;
 
 export async function POST(request: Request) {

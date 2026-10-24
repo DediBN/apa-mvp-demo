@@ -9,6 +9,9 @@ import { CandidateEvaluationResult } from "../../lib/evaluation-agent/mock";
 import type { GeneratedScenario, JudgeResponse, OptionScore } from "../../lib/skills/types";
 import { buildZip, skillFolderName } from "../../lib/skills/zip";
 import { StatusPill } from "../ui/status-pill";
+import { pool, scoreRun, spread, withinNoise, type Issue, type RunJudgement } from "../../lib/skills/tech-scoring";
+import { recommend, type OptionResult } from "../../lib/business/scoring";
+import { Markdown } from "../business/markdown";
 
 // Step 03 in skill mode: every option runs the real task on the customer's real data, then one judge scores all
 // outputs against the same ground truth. No simulated scenarios, no formula-generated parameters.
@@ -23,7 +26,7 @@ interface SkillEvaluationCenterProps {
 
 type ReliabilityTag = "found_in_data" | "inferred" | "needs_approval" | "missing_info" | "cannot_demonstrate";
 type ResultItem = { label: string; detail: string; reliability: ReliabilityTag; reason?: string };
-type RunResult = { items: ResultItem[]; summary: string };
+type RunResult = { items: ResultItem[]; summary: string; deliverable?: string };
 
 type LaneState = "queued" | "authoring" | "running" | "done" | "error";
 
@@ -74,6 +77,11 @@ async function postJson<T>(url: string, body: unknown): Promise<T> {
   return data as T;
 }
 
+// Ranking: correctness first, then format.
+function byScore(a: OptionScore, b: OptionScore): number {
+  return (b.correctness ?? b.composite) - (a.correctness ?? a.composite) || (b.format ?? -1) - (a.format ?? -1);
+}
+
 function scoreTone(value: number): string {
   if (value >= 80) return "text-emerald-400";
   if (value >= 50) return "text-amber-400";
@@ -115,6 +123,8 @@ export function SkillEvaluationCenter({ status, ajd, candidates, onEvaluationDon
   const [judge, setJudge] = useState<JudgeResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [openKey, setOpenKey] = useState<string | null>(null);
+  const [repeats, setRepeats] = useState(3);
+  const [unscoredRuns, setUnscoredRuns] = useState(0);
 
   const visible = status.state === "EVALUATING" || status.state === "COMPLETE" || status.state === "SCORECARD";
 
@@ -153,6 +163,7 @@ export function SkillEvaluationCenter({ status, ajd, candidates, onEvaluationDon
     }
     setError(null);
     setJudge(null);
+    setUnscoredRuns(0);
     setOpenKey(null);
     setLanes(plannedLanes);
 
@@ -222,32 +233,55 @@ export function SkillEvaluationCenter({ status, ajd, candidates, onEvaluationDon
       }
     }
 
-    // 3. Every runnable option × every test set, in parallel.
+    // 3. Ground truth is fixed once per test set, before any output exists (and in parallel with the runs).
+    const truthP = Promise.all(
+      sets.map((set) =>
+        postJson<{ issues: Issue[]; source: string }>("/api/skills/ground-truth", {
+          action_description: actionDescription,
+          customer_data: set.customer.slice(0, MAX_CHARS),
+          reference_data: set.reference.slice(0, MAX_CHARS),
+          answer_key: set.answerKey
+        }).then((r) => ({ setId: set.id, issues: r.issues }))
+      )
+    );
+
+    // 4. Every runnable option × every test set × every repetition, a few at a time.
     const runnable = plannedLanes.filter((lane) => lane.kind !== "custom" || skillByLane.get(lane.candidate.candidate_id));
     runnable.forEach((lane) => updateLane(lane.candidate.candidate_id, { state: "running" }));
-    const runs = await Promise.all(
+    const reps = Array.from({ length: repeats }, (_, i) => i);
+    const runs = await pool(
       runnable.flatMap((lane) =>
-        sets.map(async (set) => {
-          try {
-            const result = await postJson<RunResult>("/api/concierge-demo", {
+        sets.flatMap((set) =>
+          reps.map((rep) => async () => {
+            const body = {
               action_description: actionDescription,
               customer_data: set.customer.slice(0, MAX_CHARS),
               reference_data: set.reference.slice(0, MAX_CHARS),
               skill_md: skillByLane.get(lane.candidate.candidate_id),
               skill_name: lane.kind === "baseline" ? undefined : lane.candidate.name
-            });
-            return { laneId: lane.candidate.candidate_id, setId: set.id, result };
-          } catch (e) {
-            return { laneId: lane.candidate.candidate_id, setId: set.id, error: e instanceof Error ? e.message : "Run failed" };
-          }
-        })
-      )
+            };
+            // One retry: a single transient failure should not knock a run out of the comparison.
+            let lastError = "Run failed";
+            for (let attempt = 0; attempt < 2; attempt += 1) {
+              try {
+                const result = await postJson<RunResult>("/api/concierge-demo", body);
+                return { laneId: lane.candidate.candidate_id, setId: set.id, rep, result };
+              } catch (e) {
+                lastError = e instanceof Error ? e.message : "Run failed";
+              }
+            }
+            return { laneId: lane.candidate.candidate_id, setId: set.id, rep, error: lastError };
+          })
+        )
+      ),
+      8
     );
 
     const finished: Lane[] = plannedLanes.map((lane) => {
       const id = lane.candidate.candidate_id;
       const mine = runs.filter((r) => r.laneId === id);
-      const ok = mine.filter((r) => r.result);
+      // The output shown is the first repetition; every repetition is scored.
+      const ok = mine.filter((r) => r.result && r.rep === 0);
       const skillMd = skillByLane.get(id) ?? lane.skillMd;
       if (ok.length === 0) {
         const message = mine.find((r) => r.error)?.error || "Not run";
@@ -256,7 +290,12 @@ export function SkillEvaluationCenter({ status, ajd, candidates, onEvaluationDon
       }
       const merged: RunResult = {
         summary: ok.map((r) => `${sets.length > 1 ? `[${r.setId}] ` : ""}${r.result?.summary ?? ""}`).join("\n"),
-        items: ok.flatMap((r) => (r.result?.items ?? []).map((it) => (sets.length > 1 ? { ...it, label: `[${r.setId}] ${it.label}` } : it)))
+        items: ok.flatMap((r) => (r.result?.items ?? []).map((it) => (sets.length > 1 ? { ...it, label: `[${r.setId}] ${it.label}` } : it))),
+        deliverable:
+          ok
+            .filter((r) => r.result?.deliverable?.trim())
+            .map((r) => `${sets.length > 1 ? `### ${r.setId}\n\n` : ""}${r.result!.deliverable!.trim()}`)
+            .join("\n\n") || undefined
       };
       updateLane(id, { state: "done", result: merged, skillMd });
       return { ...lane, skillMd, state: "done", result: merged };
@@ -268,74 +307,98 @@ export function SkillEvaluationCenter({ status, ajd, candidates, onEvaluationDon
       return;
     }
 
-    // 4. Judge each test set against its own ground truth, then aggregate counts across sets.
+    // 5. Judge every run on its own, blind, against its set's fixed ground truth; then aggregate per option.
     setStage("judging");
-    addLog("All runs finished. Scoring every output against one ground truth per test set.");
+    addLog(`All runs finished. Scoring each of ${runs.filter((r) => r.result).length} runs blind against a fixed ground truth.`);
     try {
-      const judgedSets = await Promise.all(
-        sets.map(async (set) => {
-          const outputs = runs
-            .filter((r) => r.setId === set.id && r.result)
-            .map((r) => {
-              const lane = plannedLanes.find((l) => l.candidate.candidate_id === r.laneId)!;
-              return { key: r.laneId, name: lane.candidate.name, summary: r.result?.summary, items: r.result?.items ?? [] };
-            });
-          const judged = await postJson<JudgeResponse>("/api/skills/judge", {
-            action_description: actionDescription,
-            customer_data: set.customer.slice(0, MAX_CHARS),
-            reference_data: set.reference.slice(0, MAX_CHARS),
-            answer_key: set.answerKey,
-            outputs
-          });
-          return { set, judged };
-        })
+      const truths = await truthP;
+      const truthBySet = new Map(truths.map((t) => [t.setId, t.issues]));
+      const judgements = await pool(
+        runs
+          .filter((r) => r.result)
+          .map((r) => async () => {
+            const set = sets.find((s) => s.id === r.setId)!;
+            const body = {
+              action_description: actionDescription,
+              customer_data: set.customer.slice(0, MAX_CHARS),
+              reference_data: set.reference.slice(0, MAX_CHARS),
+              issues: truthBySet.get(r.setId) ?? [],
+              output: { summary: r.result?.summary, items: r.result?.items ?? [], deliverable: r.result?.deliverable }
+            };
+            // A failed judgement is retried once, and never counted as a zero.
+            for (let attempt = 0; attempt < 2; attempt += 1) {
+              try {
+                const j = await postJson<RunJudgement & { verdict: string }>("/api/skills/judge-one", body);
+                return { ...r, judgement: j };
+              } catch {
+                if (attempt === 0) await new Promise((res) => setTimeout(res, 2000));
+              }
+            }
+            return { ...r, judgement: null };
+          }),
+        6
       );
+      const unscored = judgements.filter((j) => !j.judgement).length;
+      if (unscored > 0) addLog(`${unscored} run(s) could not be scored and were left out — they are not counted as zero.`);
+      setUnscoredRuns(unscored);
 
       const multi = sets.length > 1;
       const prefix = (setId: string, id: string) => (multi ? `${setId}·${id}` : id);
-      const issues = judgedSets.flatMap(({ set, judged }) =>
-        judged.issues.map((issue) => ({ id: prefix(set.id, issue.id), description: multi ? `[${set.id}] ${issue.description}` : issue.description }))
+      const issues: Issue[] = truths.flatMap(({ setId, issues: list }) =>
+        list.map((issue) => ({ ...issue, id: prefix(setId, issue.id), description: multi ? `[${setId}] ${issue.description}` : issue.description }))
       );
-      const pct = (n: number) => Math.max(0, Math.min(100, Math.round(n * 100)));
-      const scores: OptionScore[] = finished
-        .filter((lane) => lane.result)
-        .map((lane) => {
-          const per = judgedSets
-            .map(({ set, judged }) => ({ set, score: judged.scores.find((sc) => sc.key === lane.candidate.candidate_id) }))
-            .filter((x): x is { set: typeof x.set; score: OptionScore } => Boolean(x.score));
-          const found = per.flatMap(({ set, score }) => score.found.map((id) => prefix(set.id, id)));
-          const missed = issues.map((i) => i.id).filter((id) => !found.includes(id));
-          const falseFlags = per.flatMap(({ set, score }) => score.false_flags.map((f) => ({ ...f, item: multi ? `[${set.id}] ${f.item}` : f.item })));
-          const unsupported = per.reduce((sum, { score }) => sum + score.unsupported, 0);
-          const totalItems = per.reduce((sum, { score }) => sum + score.total_items, 0);
-          const recall = issues.length ? found.length / issues.length : 0;
-          const flagged = found.length + falseFlags.length;
-          const precision = flagged ? found.length / flagged : 0;
-          const grounding = totalItems ? 1 - unsupported / totalItems : 0;
-          return {
-            key: lane.candidate.candidate_id,
-            name: lane.candidate.name,
-            found,
-            missed,
-            false_flags: falseFlags,
-            unsupported,
-            total_items: totalItems,
-            recall: pct(recall),
-            precision: pct(precision),
-            grounding: pct(grounding),
-            composite: pct(recall * 0.6 + precision * 0.3 + grounding * 0.1),
-            verdict: per.map(({ set, score }) => `${multi ? `[${set.id}] ` : ""}${score.verdict}`).join(" ")
-          };
+
+      const scores: OptionScore[] = [];
+      for (const lane of finished.filter((l) => l.result)) {
+        const id = lane.candidate.candidate_id;
+        const judgedAll = judgements.filter((j) => j.laneId === id && j.judgement);
+        // Score a repetition only when every test set in it was judged; a partial one would read as misses.
+        const completeReps = reps.filter((rep) => judgedAll.filter((j) => j.rep === rep).length >= sets.length);
+        const mine = judgedAll.filter((j) => completeReps.includes(j.rep));
+        const repScores = completeReps.map((rep) =>
+          scoreRun(
+            issues,
+            mine.filter((j) => j.rep === rep).map((j) => ({ ...j.judgement!, found: j.judgement!.found.map((f) => prefix(j.setId, f)) }))
+          )
+        );
+        if (repScores.length === 0) continue;
+        const corr = spread(repScores.map((s) => s.correctness));
+        const fmtValues = repScores.map((s) => s.format).filter((f): f is number => f !== null);
+        const mean = (xs: number[]) => Math.round(xs.reduce((a, b) => a + b, 0) / xs.length);
+        // An issue counts as found when most repetitions found it.
+        const foundCount = new Map<string, number>();
+        mine.forEach((j) => j.judgement!.found.forEach((f) => foundCount.set(prefix(j.setId, f), (foundCount.get(prefix(j.setId, f)) ?? 0) + 1)));
+        const found = issues.map((i) => i.id).filter((iid) => (foundCount.get(iid) ?? 0) * 2 >= repScores.length && (foundCount.get(iid) ?? 0) > 0);
+        const first = mine.filter((j) => j.rep === completeReps[0]);
+        scores.push({
+          key: id,
+          name: lane.candidate.name,
+          found,
+          missed: issues.map((i) => i.id).filter((iid) => !found.includes(iid)),
+          false_flags: first.flatMap((j) => j.judgement!.false_flags.map((f) => ({ ...f, item: multi ? `[${j.setId}] ${f.item}` : f.item }))),
+          unsupported: first.reduce((s, j) => s + j.judgement!.unsupported, 0),
+          total_items: first.reduce((s, j) => s + j.judgement!.total_items, 0),
+          recall: mean(repScores.map((s) => s.recall)),
+          precision: mean(repScores.map((s) => s.precision)),
+          grounding: mean(repScores.map((s) => s.grounding)),
+          composite: corr.mean,
+          correctness: corr.mean,
+          correctness_min: corr.min,
+          correctness_max: corr.max,
+          format: fmtValues.length ? mean(fmtValues) : null,
+          runs: repScores.length,
+          verdict: first.map((j) => `${multi ? `[${j.setId}] ` : ""}${j.judgement!.verdict}`).join(" ")
         });
+      }
 
       const groundTruth: JudgeResponse["ground_truth"] =
         mode === "scenarios" ? "generated_scenarios" : answerKey.trim() ? "answer_key" : "independent_audit";
       const aggregated: JudgeResponse = { ground_truth: groundTruth, issues, scores };
       setJudge(aggregated);
-      setOpenKey([...scores].sort((a, b) => b.composite - a.composite)[0]?.key ?? null);
+      const ranked = [...scores].sort(byScore);
+      setOpenKey(ranked[0]?.key ?? null);
       setStage("done");
-      const ranked = [...scores].sort((a, b) => b.composite - a.composite);
-      addLog(`Scoring done. Top: ${ranked[0]?.name} · ${ranked[0]?.composite}`);
+      addLog(`Scoring done. Top: ${ranked[0]?.name} · correctness ${ranked[0]?.correctness} (${ranked[0]?.correctness_min}–${ranked[0]?.correctness_max})`);
       onEvaluationDone(finished.map((lane) => toEvaluationResult(lane, scores.find((sc) => sc.key === lane.candidate.candidate_id))));
     } catch (e) {
       setError(e instanceof Error ? e.message : "Scoring failed.");
@@ -369,33 +432,44 @@ export function SkillEvaluationCenter({ status, ajd, candidates, onEvaluationDon
     );
   }
 
-  const ranked = judge ? [...judge.scores].sort((a, b) => b.composite - a.composite) : [];
+  const ranked = judge ? [...judge.scores].sort(byScore) : [];
   const baselineScore = judge?.scores.find((s) => s.key === "skill_baseline_none");
-  const winner = ranked.find((s) => s.key !== "skill_baseline_none");
-  const winnerBeatsBaseline = Boolean(winner && (!baselineScore || winner.composite > baselineScore.composite));
-  // Recommendation: only skills that fit the task are eligible (the custom skill, or a directory skill that passed
-  // screening). A weak-fit skill can score well because the task and data were detailed enough, not because of the
-  // skill, so it is never recommended. Ties go to the custom skill (it carries the business's own rules), then to
-  // the better screening fit.
   const laneFor = (key: string) => lanes.find((l) => l.candidate.candidate_id === key);
-  const isEligible = (key: string) => {
+  const fitOf = (key: string) => {
     const lane = laneFor(key);
-    if (!lane || key === "skill_baseline_none") return false;
-    return lane.kind === "custom" || (lane.candidate.fit_score_pre_eval ?? 0) >= 40;
+    return lane?.kind === "custom" ? 100 : lane?.kind === "baseline" ? 0 : lane?.candidate.fit_score_pre_eval ?? 0;
   };
-  const recommendedScore = [...ranked]
-    .filter((sc) => isEligible(sc.key))
-    .sort(
-      (a, b) =>
-        b.composite - a.composite ||
-        Number(laneFor(b.key)?.kind === "custom") - Number(laneFor(a.key)?.kind === "custom") ||
-        (laneFor(b.key)?.candidate.fit_score_pre_eval ?? 0) - (laneFor(a.key)?.candidate.fit_score_pre_eval ?? 0)
-    )[0];
+  // Recommendation (shared, unit-tested rule): only the custom skill or a directory skill that passed screening
+  // (fit >= 40); rank by correctness, then format; ties go to the custom skill, then to the better fit.
+  const rec = judge
+    ? recommend(
+        judge.scores.map(
+          (s): OptionResult => ({
+            key: s.key,
+            kind: laneFor(s.key)?.kind ?? "directory",
+            fit: fitOf(s.key),
+            correctness: s.correctness ?? s.composite,
+            format: s.format ?? null,
+            invented: s.unsupported,
+            cases: s.runs ?? 1
+          })
+        )
+      )
+    : null;
+  const recommendedScore = judge?.scores.find((s) => s.key === rec?.key);
+  const sp = (s?: OptionScore) => ({ mean: s?.correctness ?? s?.composite ?? 0, min: s?.correctness_min ?? s?.composite ?? 0, max: s?.correctness_max ?? s?.composite ?? 0, runs: s?.runs ?? 1 });
+  const inNoise = Boolean(recommendedScore && baselineScore && withinNoise(sp(recommendedScore), sp(baselineScore)));
+  const winner = recommendedScore;
+  const winnerBeatsBaseline = Boolean(winner && (!baselineScore || (!inNoise && (winner.correctness ?? 0) > (baselineScore.correctness ?? 0))));
+  const range = (s: OptionScore) => ((s.runs ?? 1) > 1 ? `${s.correctness_min}–${s.correctness_max}` : "");
   const recommendedLane =
     lanes.find((l) => l.candidate.candidate_id === recommendedScore?.key && l.skillMd) ??
     lanes.find((l) => l.kind === "custom" && l.skillMd) ??
-    lanes.find((l) => l.kind === "directory" && l.skillMd);
-  const failedLanes = lanes.filter((lane) => lane.state === "error" || (lane.kind !== "baseline" && !lane.result));
+    lanes.find((l) => l.kind === "directory" && l.skillMd && (l.candidate.fit_score_pre_eval ?? 0) >= 40);
+  // Options that failed to run, or ran but could not be scored, are listed — never silently dropped.
+  const failedLanes = lanes
+    .filter((lane) => lane.state === "error" || !lane.result || (judge && !judge.scores.some((sc) => sc.key === lane.candidate.candidate_id)))
+    .map((lane) => (lane.state !== "error" && lane.result ? { ...lane, error: "ran, but scoring failed — press Run again" } : lane));
   const directoryCandidateCount = candidates.filter((c) => laneKind(c) === "directory" && c.skill?.content?.trim()).length;
   const issueText = (id: string) => judge?.issues.find((i) => i.id === id)?.description ?? id;
 
@@ -484,6 +558,17 @@ export function SkillEvaluationCenter({ status, ajd, candidates, onEvaluationDon
                 <input type="checkbox" checked={authorCustom} onChange={(e) => setAuthorCustom(e.target.checked)} />
                 Write a custom skill from the Skill Spec and include it
               </label>
+              <label className="flex items-center gap-2 text-sm text-command-text">
+                Runs per option
+                <select
+                  value={repeats}
+                  onChange={(e) => setRepeats(Number(e.target.value))}
+                  className="rounded border border-command-border bg-command-bg px-2 py-1 font-mono text-xs"
+                >
+                  <option value={1}>1 (fast, no noise estimate)</option>
+                  <option value={3}>3 (shows run-to-run range)</option>
+                </select>
+              </label>
 
               <div className="rounded border border-command-border/60 p-2 font-mono text-[11px] text-command-muted">
                 Options to run ({plannedLanes.length}):
@@ -517,7 +602,7 @@ export function SkillEvaluationCenter({ status, ajd, candidates, onEvaluationDon
             <div key={lane.candidate.candidate_id} className="command-card flex items-center justify-between gap-3 p-3">
               <div>
                 <p className="text-sm font-semibold text-command-text">{lane.candidate.name}</p>
-                <p className="font-mono text-[10px] uppercase tracking-[0.14em] text-command-muted">{lane.candidate.source}</p>
+                <p className="font-mono text-[10px] uppercase tracking-[0.14em] text-command-muted">{lane.kind === "baseline" ? "No skill" : lane.candidate.source}</p>
               </div>
               <span
                 className={`font-mono text-xs ${
@@ -537,9 +622,33 @@ export function SkillEvaluationCenter({ status, ajd, candidates, onEvaluationDon
           <div className={`rounded-lg border p-4 ${winnerBeatsBaseline ? "border-emerald-400/40 bg-emerald-400/5" : "border-amber-400/40 bg-amber-400/5"}`}>
             {winner && winnerBeatsBaseline ? (
               <p className="text-sm text-command-text">
-                <span className="font-semibold">{winner.name}</span> scored {winner.composite}
-                {baselineScore ? ` vs ${baselineScore.composite} for Claude with no skill` : ""} — it found {winner.found.length} of {judge.issues.length} issues
-                {winner.false_flags.length ? ` with ${winner.false_flags.length} false flag${winner.false_flags.length === 1 ? "" : "s"}` : " with no false flags"}.
+                <span className="font-semibold">{winner.name}</span>: correctness {winner.correctness}
+                {range(winner) ? ` (runs ${range(winner)})` : ""}
+                {baselineScore ? ` vs ${baselineScore.correctness}${range(baselineScore) ? ` (${range(baselineScore)})` : ""} for Claude with no skill` : ""}.{" "}
+                {rec?.improvement === "format"
+                  ? "The gain is mainly in format."
+                  : rec?.improvement === "both"
+                    ? "Better on correctness and format."
+                    : rec?.improvement === "correctness"
+                      ? "The gain is in correctness."
+                      : "The gain is small."}
+              </p>
+            ) : winner && inNoise ? (
+              <div className="text-sm text-command-text">
+                <p className="font-semibold text-amber-400">No clear difference from Claude with no skill on this test.</p>
+                <p className="mt-1 text-command-muted">
+                  {winner.name}: correctness {winner.correctness}
+                  {range(winner) ? ` (runs ${range(winner)})` : ""} vs {baselineScore?.correctness}
+                  {baselineScore && range(baselineScore) ? ` (${range(baselineScore)})` : ""} — the results overlap, so the gap is within run-to-run noise.
+                  {winner.format !== null && baselineScore?.format !== null && (winner.format ?? 0) - (baselineScore?.format ?? 0) >= 10
+                    ? ` The skill did follow the required format better (${winner.format}% vs ${baselineScore?.format}%).`
+                    : ""}
+                </p>
+              </div>
+            ) : !winner && ranked.some((s) => s.key !== "skill_baseline_none") ? (
+              <p className="text-sm text-command-text">
+                <span className="font-semibold text-amber-400">No skill is eligible for a recommendation.</span> The directory skills that ran did not
+                pass screening (weak fit), and no custom skill was scored.
               </p>
             ) : !winner ? (
               <div className="text-sm text-command-text">
@@ -556,7 +665,11 @@ export function SkillEvaluationCenter({ status, ajd, candidates, onEvaluationDon
               </div>
             ) : (
               <p className="text-sm text-command-text">
-                Claude with no skill scored highest on this test. The best skill is still offered below (Step 04) if you want this process built into Claude.
+                <span className="font-semibold text-amber-400">Claude with no skill did better on this test</span> — correctness{" "}
+                {baselineScore?.correctness}
+                {baselineScore && range(baselineScore) ? ` (runs ${range(baselineScore)})` : ""} vs {winner.correctness}
+                {range(winner) ? ` (runs ${range(winner)})` : ""} for the best skill, {winner.name}. A skill is not needed for correctness here;
+                it is offered in Step 04 only if you want this process written down and applied the same way every time.
               </p>
             )}
             <p className="mt-1 font-mono text-[11px] text-command-muted">
@@ -566,6 +679,11 @@ export function SkillEvaluationCenter({ status, ajd, candidates, onEvaluationDon
                   ? `${scenarios.length} generated scenarios with planted answer keys (synthetic — confirm on real data before relying on it)`
                   : "independent audit of the data (indicative)"} · {judge.issues.length} issues
             </p>
+            {unscoredRuns > 0 && (
+              <p className="mt-1 font-mono text-[11px] text-amber-400">
+                {unscoredRuns} run(s) could not be scored and were left out of the averages (not counted as zero).
+              </p>
+            )}
           </div>
 
           {judge.ground_truth === "generated_scenarios" && scenarios.length > 0 && (
@@ -595,10 +713,12 @@ export function SkillEvaluationCenter({ status, ajd, candidates, onEvaluationDon
                 <tr className="border-b border-command-border text-left text-command-muted">
                   <th className="py-2 pr-2 font-normal">#</th>
                   <th className="py-2 pr-2 font-normal">Option</th>
+                  <th className="py-2 pr-2 font-normal" title="Screening fit (directory skills)">Fit</th>
+                  <th className="py-2 pr-2 font-normal" title="60% recall + 30% precision + 10% grounding, on correctness items; mean and range over runs">Correctness</th>
+                  <th className="py-2 pr-2 font-normal" title="Share of format requirements met">Format</th>
                   <th className="py-2 pr-2 font-normal" title="Share of real issues found">Recall</th>
                   <th className="py-2 pr-2 font-normal" title="Share of flags that were real issues">Precision</th>
                   <th className="py-2 pr-2 font-normal" title="Share of items grounded in the data">Grounding</th>
-                  <th className="py-2 pr-2 font-normal">Score</th>
                   <th className="py-2 pr-2 font-normal">Found</th>
                 </tr>
               </thead>
@@ -612,11 +732,28 @@ export function SkillEvaluationCenter({ status, ajd, candidates, onEvaluationDon
                     <td className="py-2 pr-2 text-command-muted">{i + 1}</td>
                     <td className="py-2 pr-2">
                       <span className="font-sans text-sm font-semibold">{s.name}</span>
+                      {s.key === rec?.key ? <span className="ml-2 text-command-action">{winnerBeatsBaseline || inNoise ? "★ recommended" : "★ best skill"}</span> : null}
+                    </td>
+                    <td className="py-2 pr-2">
+                      {laneFor(s.key)?.kind === "directory" ? (
+                        <span className={fitOf(s.key) < 40 ? "text-amber-400" : "text-command-text"} title={fitOf(s.key) < 40 ? "Weak fit — tested, never recommended" : ""}>
+                          {fitOf(s.key)}
+                          {fitOf(s.key) < 40 ? " weak" : ""}
+                        </span>
+                      ) : (
+                        <span className="text-command-muted">—</span>
+                      )}
+                    </td>
+                    <td className={`py-2 pr-2 text-sm font-semibold ${scoreTone(s.correctness ?? s.composite)}`}>
+                      {s.correctness ?? s.composite}
+                      {range(s) ? <span className="ml-1 text-[10px] font-normal text-command-muted">({range(s)})</span> : null}
+                    </td>
+                    <td className={`py-2 pr-2 ${s.format === null || s.format === undefined ? "text-command-muted" : scoreTone(s.format)}`}>
+                      {s.format === null || s.format === undefined ? "—" : `${s.format}%`}
                     </td>
                     <td className={`py-2 pr-2 ${scoreTone(s.recall)}`}>{s.recall}%</td>
                     <td className={`py-2 pr-2 ${scoreTone(s.precision)}`}>{s.precision}%</td>
                     <td className={`py-2 pr-2 ${scoreTone(s.grounding)}`}>{s.grounding}%</td>
-                    <td className={`py-2 pr-2 text-sm font-semibold ${scoreTone(s.composite)}`}>{s.composite}</td>
                     <td className="py-2 pr-2">
                       {s.found.length}/{judge.issues.length}
                       {s.false_flags.length ? <span className="text-red-400"> · {s.false_flags.length} false</span> : null}
@@ -629,14 +766,14 @@ export function SkillEvaluationCenter({ status, ajd, candidates, onEvaluationDon
                     <td className="py-2 pr-2">
                       <span className="font-sans text-sm">{lane.candidate.name}</span>
                     </td>
-                    <td colSpan={5} className="py-2 pr-2 text-red-400">
+                    <td colSpan={7} className="py-2 pr-2 text-red-400">
                       Not scored: {lane.error || "did not run"}
                     </td>
                   </tr>
                 ))}
               </tbody>
             </table>
-            <p className="mt-2 font-mono text-[10px] text-command-muted">Score = 60% recall + 30% precision + 10% grounding. Click a row for details.</p>
+            <p className="mt-2 font-mono text-[10px] text-command-muted">Correctness = 60% recall + 30% precision + 10% grounding, on correctness items only; format is scored separately. Each output judged blind, on its own, by one fixed model. Numbers in brackets = lowest–highest over runs. Recommendation: custom skill or a directory skill with fit ≥ 40; ties go to the custom skill. Click a row for details.</p>
           </div>
 
           {(() => {
@@ -664,8 +801,18 @@ export function SkillEvaluationCenter({ status, ajd, candidates, onEvaluationDon
                     ))}
                   </div>
                 )}
-                <details open>
-                  <summary className="cursor-pointer font-mono text-[11px] uppercase tracking-[0.14em] text-command-muted">Output ({lane.result?.items.length ?? 0} items)</summary>
+                {lane.result?.deliverable ? (
+                  <div>
+                    <p className="font-mono text-[11px] uppercase tracking-[0.14em] text-command-muted">What it produced (first run)</p>
+                    <div dir="auto" className="mt-2 max-h-[28rem] overflow-auto rounded border border-command-border bg-command-bg/60 p-3 font-sans text-sm text-command-text">
+                      <Markdown text={lane.result.deliverable} />
+                    </div>
+                  </div>
+                ) : null}
+                <details open={!lane.result?.deliverable}>
+                  <summary className="cursor-pointer font-mono text-[11px] uppercase tracking-[0.14em] text-command-muted">
+                    {lane.result?.deliverable ? "Checks and open points" : "Output"} ({lane.result?.items.length ?? 0} items)
+                  </summary>
                   <div className="mt-2 space-y-2">
                     {lane.result?.items.map((item, i) => {
                       const meta = TAG_META[item.reliability] ?? TAG_META.cannot_demonstrate;
@@ -718,14 +865,16 @@ export function SkillEvaluationCenter({ status, ajd, candidates, onEvaluationDon
             <p className="font-mono text-xs uppercase tracking-[0.18em] text-command-muted">Step 04 · Install in Claude</p>
             {recommendedLane ? (
               <>
-                <p className="mt-2 text-lg font-semibold text-command-text">Recommended skill: {recommendedLane.candidate.name}</p>
+                <p className="mt-2 text-lg font-semibold text-command-text">{winnerBeatsBaseline ? "Recommended skill" : "Best skill (optional)"}: {recommendedLane.candidate.name}</p>
                 <p className="mt-1 text-sm text-command-muted">
                   {recommendedScore && baselineScore
-                    ? recommendedScore.composite > baselineScore.composite
-                      ? `Scored ${recommendedScore.composite} vs ${baselineScore.composite} for Claude with no skill — it adds measurable value on this test.`
-                      : `Scored ${recommendedScore.composite} vs ${baselineScore.composite} for Claude with no skill. Claude alone did as well or better on this test; the skill's value is applying your process the same way every time.`
+                    ? winnerBeatsBaseline
+                      ? `Correctness ${recommendedScore.correctness} vs ${baselineScore.correctness} for Claude with no skill — a clear gain on this test.`
+                      : inNoise
+                        ? `Correctness ${recommendedScore.correctness} vs ${baselineScore.correctness} for Claude with no skill — within run-to-run noise. ${recommendedLane.kind === "custom" ? "The skill's value here is applying your process the same way every time" : "Installing it is optional — it did not measurably improve the result"}${(recommendedScore.format ?? 0) - (baselineScore.format ?? 0) >= 10 ? ", though it followed your format better" : ""}.`
+                        : `Correctness ${recommendedScore.correctness} vs ${baselineScore.correctness} for Claude with no skill. Claude alone did better on this test, so a skill is not needed for correctness${recommendedLane.kind === "custom" ? "; install it only if you want your process written down and applied the same way every time" : ""}.`
                     : recommendedScore
-                      ? `Scored ${recommendedScore.composite}.`
+                      ? `Correctness ${recommendedScore.correctness}.`
                       : "Not scored in this run — it is recommended because it was written for this exact process. Run again to measure it."}
                 </p>
                 <div className="mt-3 flex flex-wrap items-center gap-3">

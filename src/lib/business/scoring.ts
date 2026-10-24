@@ -39,7 +39,7 @@ export interface Recommendation {
   reason: "best_score" | "tie_custom" | "tie_fit" | "only_eligible" | "no_eligible";
 }
 
-const TABLE_WORDS = /טבלה|טבלא|table|tabular|columns?\b|עמודות/i;
+export const TABLE_WORDS = /טבלה|טבלא|table|tabular|columns?\b|עמודות/i;
 
 // A real markdown table: a header row, a separator row (|---|---|) and at least one data row.
 export function hasMarkdownTable(text: string): boolean {
