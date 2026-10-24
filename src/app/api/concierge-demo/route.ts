@@ -160,7 +160,8 @@ export async function POST(req: NextRequest) {
     let toolItems: unknown = toolInput?.items;
     if (typeof toolItems === "string") {
       try {
-        toolItems = JSON.parse(toolItems);
+        const parsed = JSON.parse(toolItems);
+        toolItems = parsed && !Array.isArray(parsed) && typeof parsed === "object" && "items" in parsed ? parsed.items : parsed;
       } catch {
         toolItems = null;
       }

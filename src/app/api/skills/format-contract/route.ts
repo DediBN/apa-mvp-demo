@@ -93,7 +93,7 @@ export async function POST(request: Request) {
       .filter((r) => r?.description?.trim())
       .slice(0, 8)
       .map((r, i) => ({ id: `F${i + 1}`, description: r.description.trim(), check: cleanCheck(r.check) }));
-    if (requirements.length === 0) throw new Error(`No format requirements: ${JSON.stringify(result).slice(0, 300)}`);
+    if (requirements.length === 0) throw new Error("No format requirements");
     return NextResponse.json({ requirements });
   } catch (error) {
     console.error("[skills/format-contract]", error instanceof Error ? error.message : error);

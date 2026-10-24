@@ -14,7 +14,9 @@ function unstringify(input: unknown): unknown {
   for (const [key, value] of Object.entries(input as Record<string, unknown>)) {
     if (typeof value === "string" && /^\s*[[{]/.test(value)) {
       try {
-        out[key] = JSON.parse(value);
+        const parsed = JSON.parse(value);
+        // Sometimes the whole answer is nested under its own key again: {"items": "{\"items\": [...]}"}.
+        out[key] = parsed && typeof parsed === "object" && !Array.isArray(parsed) && key in parsed ? parsed[key] : parsed;
         continue;
       } catch {
         // keep the string as is
