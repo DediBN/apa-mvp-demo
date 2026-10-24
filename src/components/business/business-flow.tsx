@@ -599,6 +599,7 @@ export function BusinessFlow() {
 
               <h3 className="mt-8 text-lg font-semibold">{t.s3Scores}</h3>
               <p className="mt-1">{verdictText}</p>
+              <p className="mt-1 text-xs text-command-muted">{t.s3BaselineNote}</p>
               {recommended && baseline ? (
                 <div className="mt-3 overflow-x-auto">
                   <table className="w-full border-collapse text-sm">
