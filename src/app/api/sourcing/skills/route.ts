@@ -145,7 +145,7 @@ export async function POST(request: Request) {
       .map((entry) => entry.hit);
 
     // 3. Retrieve SKILL.md for each (skills without a readable SKILL.md are dropped — we only shortlist what we can read)
-    const withContent = (
+    const withContentRaw = (
       await Promise.all(
         ranked.map(async (hit) => {
           const md = await fetchSkillMd(hit);
@@ -153,6 +153,20 @@ export async function POST(request: Request) {
         })
       )
     ).filter((x): x is { hit: SkillHit; content: string; rawUrl: string } => x !== null);
+
+    // The same skill is often republished by several authors (forks, mirrors). Keep one copy — the most popular —
+    // per skill name or identical SKILL.md, so the shortlist and the evaluation never test the same skill twice.
+    const fingerprint = (text: string) => text.replace(/\s+/g, " ").trim().slice(0, 3000).toLowerCase();
+    const byKey = new Map<string, (typeof withContentRaw)[number]>();
+    for (const entry of withContentRaw) {
+      const keys = [`n:${entry.hit.name.trim().toLowerCase()}`, `c:${fingerprint(entry.content)}`];
+      const dup = keys.map((k) => byKey.get(k)).find(Boolean);
+      if (dup && popularity(dup.hit) >= popularity(entry.hit)) continue;
+      if (dup) for (const [k, v] of Array.from(byKey.entries())) if (v === dup) byKey.delete(k);
+      keys.forEach((k) => byKey.set(k, entry));
+    }
+    const kept = new Set(byKey.values());
+    const withContent = withContentRaw.filter((entry) => kept.has(entry));
 
     let candidates: Candidate[] = [];
 
