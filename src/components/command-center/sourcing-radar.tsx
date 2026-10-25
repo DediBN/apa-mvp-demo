@@ -5,6 +5,7 @@ import { APAStatus } from "../../lib/state-machine";
 import { AJD } from "../../lib/intake-agent/mock";
 import { Candidate } from "../../lib/research-agent/mock";
 import { runSkillSourcingScan } from "../../lib/research-agent/client";
+import { securityWarning } from "../../lib/skills/security";
 import { StatusPill } from "../ui/status-pill";
 
 interface SourcingRadarProps {
@@ -285,6 +286,11 @@ export function SourcingRadar({ status, ajd, onShortlistReady, onFail, addLog }:
                       ? "Tested in Step 03"
                       : `Screening fit ${candidate.fit_score_pre_eval}${candidate.fit_score_pre_eval < 40 ? " · weak fit — tested for comparison, never recommended" : " · tested in Step 03"}`}
                   </p>
+                  {securityWarning(candidate.risk_flags) ? (
+                    <p className="mt-2 inline-flex items-center gap-1 rounded border border-red-400/50 bg-red-400/10 px-2 py-0.5 text-[11px] font-semibold text-red-300">
+                      ⚠ {securityWarning(candidate.risk_flags)}
+                    </p>
+                  ) : null}
                   <p className="mt-2 text-xs text-command-muted">{candidate.reason_codes[0]}</p>
                   {candidate.reason_codes[1] ? (
                     <p className="mt-1 font-mono text-[10px] text-command-muted">{candidate.reason_codes[1]}</p>

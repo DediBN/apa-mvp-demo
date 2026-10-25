@@ -276,8 +276,11 @@ export async function fetchSkillMd(hit: SkillHit): Promise<{ content: string; ra
 // Signals the screener cannot see from SKILL.md text alone.
 export function skillMdRiskSignals(content: string): string[] {
   const flags: string[] = [];
-  if (/scripts?\/|```(?:bash|sh|python|py|js|ts)/i.test(content)) {
-    flags.push("Contains code or shell steps — not executed in this demo; review before use");
+  // Instructions that make Claude execute something on the user's machine or install software.
+  if (/(?:python3?|node|bash|sh|npx|uvx?)\s+[\w./-]*scripts?\/|(?:pip3?|npm|pnpm|yarn|brew|apt(?:-get)?)\s+(?:install|add)|\bsudo\b|chmod\s+\+x|rm\s+-rf/i.test(content)) {
+    flags.push("Runs scripts or installs packages — not executed in this demo; review before use");
+  } else if (/```(?:bash|sh|python|py|js|ts)/i.test(content)) {
+    flags.push("Contains code examples");
   }
   if (/curl\s|wget\s|https?:\/\/[^\s)]+\/(?:api|upload|webhook)/i.test(content)) {
     flags.push("References outbound network calls");

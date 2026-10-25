@@ -12,6 +12,8 @@ import { StatusPill } from "../ui/status-pill";
 import { pool, scoreRun, spread, withinNoise, type Issue, type RunJudgement } from "../../lib/skills/tech-scoring";
 import { recommend, type OptionResult } from "../../lib/business/scoring";
 import { Markdown } from "../business/markdown";
+import { securityWarning } from "../../lib/skills/security";
+import { encodeReport, type SharedReport } from "../../lib/skills/share";
 import type { FormatRequirement } from "../../lib/skills/format-contract";
 
 // Step 03 in skill mode: every option runs the real task on the customer's real data, then one judge scores all
@@ -134,9 +136,11 @@ export function SkillEvaluationCenter({ status, ajd, candidates, onEvaluationDon
   const [judge, setJudge] = useState<JudgeResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [openKey, setOpenKey] = useState<string | null>(null);
-  const [repeats, setRepeats] = useState(3);
+  const [repeats, setRepeats] = useState(1);
   const [unscoredRuns, setUnscoredRuns] = useState(0);
   const [contract, setContract] = useState<FormatRequirement[]>([]);
+  const [shareUrl, setShareUrl] = useState<string | null>(null);
+  const [shareCopied, setShareCopied] = useState(false);
   // "everyday": options get the short request an employee would type; "full": every run gets the whole Skill Spec.
   const [requestMode, setRequestMode] = useState<"everyday" | "full">("everyday");
   const [ranWith, setRanWith] = useState<"everyday" | "full">("everyday");
@@ -180,6 +184,8 @@ export function SkillEvaluationCenter({ status, ajd, candidates, onEvaluationDon
     setJudge(null);
     setUnscoredRuns(0);
     setContract([]);
+    setShareUrl(null);
+    setShareCopied(false);
     setOpenKey(null);
     setLanes(plannedLanes);
 
@@ -514,6 +520,45 @@ export function SkillEvaluationCenter({ status, ajd, candidates, onEvaluationDon
     .filter((lane) => lane.state === "error" || !lane.result || (judge && !judge.scores.some((sc) => sc.key === lane.candidate.candidate_id)))
     .map((lane) => (lane.state !== "error" && lane.result ? { ...lane, error: "ran, but scoring failed — press Run again" } : lane));
   const directoryCandidateCount = candidates.filter((c) => laneKind(c) === "directory" && c.skill?.content?.trim()).length;
+  async function shareResults() {
+    if (!judge || !ajd) return;
+    const verdict: SharedReport["verdict"] = !winner ? "none" : winnerBeatsBaseline ? "gain" : inNoise ? "noise" : "baseline_better";
+    const report: SharedReport = {
+      v: 1,
+      title: ajd.job_title,
+      need: ajd.business_need.slice(0, 1200),
+      date: new Date().toISOString(),
+      groundTruth: judge.ground_truth as SharedReport["groundTruth"],
+      asked: ranWith,
+      runs: Math.max(...judge.scores.map((sc) => sc.runs ?? 1)),
+      verdict,
+      contract: contract.map((c) => c.description),
+      rows: ranked.map((sc) => {
+        const kind = laneFor(sc.key)?.kind ?? "directory";
+        return {
+          name: sc.name,
+          kind,
+          fit: kind === "directory" ? fitOf(sc.key) : null,
+          correctness: sc.correctness ?? sc.composite,
+          min: sc.correctness_min ?? sc.composite,
+          max: sc.correctness_max ?? sc.composite,
+          format: sc.format ?? null,
+          found: sc.found.length,
+          total: judge.issues.length,
+          recommended: sc.key === rec?.key && (winnerBeatsBaseline || inNoise),
+          warning: kind === "directory" ? securityWarning(laneFor(sc.key)?.candidate.risk_flags) : null
+        };
+      })
+    };
+    const url = `${window.location.origin}/report#d=${await encodeReport(report)}`;
+    setShareUrl(url);
+    try {
+      await navigator.clipboard.writeText(url);
+      setShareCopied(true);
+    } catch {
+      setShareCopied(false);
+    }
+  }
   const issueText = (id: string) => judge?.issues.find((i) => i.id === id)?.description ?? id;
 
   return (
@@ -608,8 +653,8 @@ export function SkillEvaluationCenter({ status, ajd, candidates, onEvaluationDon
                   onChange={(e) => setRepeats(Number(e.target.value))}
                   className="rounded border border-command-border bg-command-bg px-2 py-1 font-mono text-xs"
                 >
-                  <option value={1}>1 (fast, no noise estimate)</option>
-                  <option value={3}>3 (shows run-to-run range)</option>
+                  <option value={1}>1 (fast — about 3 minutes)</option>
+                  <option value={3}>3 (firmer answer, shows run-to-run range — about 8 minutes)</option>
                 </select>
               </label>
 
@@ -751,6 +796,30 @@ export function SkillEvaluationCenter({ status, ajd, candidates, onEvaluationDon
             )}
           </div>
 
+          <div className="flex flex-wrap items-center gap-2">
+            <button
+              type="button"
+              onClick={shareResults}
+              className="rounded-lg border border-command-action/60 bg-command-action/10 px-3 py-1.5 font-mono text-xs font-semibold text-command-action hover:bg-command-action/20"
+            >
+              ↗ Share results
+            </button>
+            {shareUrl ? (
+              <>
+                <input
+                  readOnly
+                  value={shareUrl}
+                  onFocus={(e) => e.currentTarget.select()}
+                  className="min-w-0 flex-1 rounded border border-command-border bg-command-bg px-2 py-1 font-mono text-[11px] text-command-muted"
+                  aria-label="Share link"
+                />
+                <span className="font-mono text-[11px] text-command-action">{shareCopied ? "Copied" : ""}</span>
+              </>
+            ) : (
+              <span className="text-xs text-command-muted">A public link with the scores only — no data, outputs or skill text.</span>
+            )}
+          </div>
+
           {judge.ground_truth === "generated_scenarios" && scenarios.length > 0 && (
             <details className="command-card p-3">
               <summary className="cursor-pointer font-mono text-[11px] uppercase tracking-[0.14em] text-command-muted">
@@ -818,6 +887,11 @@ export function SkillEvaluationCenter({ status, ajd, candidates, onEvaluationDon
                     <td className="py-2 pr-2">
                       <span className="font-sans text-sm font-semibold">{s.name}</span>
                       {s.key === rec?.key ? <span className="ml-2 text-command-action">{winnerBeatsBaseline || inNoise ? "★ recommended" : "★ best skill"}</span> : null}
+                      {securityWarning(laneFor(s.key)?.candidate.risk_flags) ? (
+                        <span className="ml-2 rounded border border-red-400/50 bg-red-400/10 px-1.5 text-[10px] font-semibold text-red-300" title={securityWarning(laneFor(s.key)?.candidate.risk_flags) ?? ""}>
+                          ⚠ review
+                        </span>
+                      ) : null}
                     </td>
                     <td className="py-2 pr-2">
                       {laneFor(s.key)?.kind === "directory" ? (
@@ -973,6 +1047,11 @@ export function SkillEvaluationCenter({ status, ajd, candidates, onEvaluationDon
                   {recommendedLane.kind === "directory" ? (
                     <span className="font-mono text-[10px] text-command-muted">
                       Only SKILL.md is packaged — scripts from the original repository are not included and were not run.
+                    </span>
+                  ) : null}
+                  {recommendedLane.kind === "directory" && securityWarning(recommendedLane.candidate.risk_flags) ? (
+                    <span className="rounded border border-red-400/50 bg-red-400/10 px-2 py-0.5 text-xs font-semibold text-red-300">
+                      ⚠ {securityWarning(recommendedLane.candidate.risk_flags)}
                     </span>
                   ) : null}
                 </div>
