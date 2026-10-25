@@ -91,7 +91,7 @@ export default function ReportPage() {
                 <td className="py-2 pr-2">
                   <span className="font-sans text-sm font-semibold">{r.name}</span>
                   {r.recommended ? <span className="ml-2 text-command-action">★</span> : null}
-                  {r.warning ? <span className="ml-2 rounded border border-red-400/50 bg-red-400/10 px-1.5 text-[10px] text-red-300" title={r.warning}>⚠ code</span> : null}
+                  {r.warning ? <span className="ml-2 rounded border border-red-400/50 bg-red-400/10 px-1.5 text-[10px] text-red-300" title={r.warning}>⚠ review</span> : null}
                 </td>
                 <td className="py-2 pr-2">{r.fit === null ? "—" : <span className={r.fit < 40 ? "text-amber-400" : ""}>{r.fit}{r.fit < 40 ? " weak" : ""}</span>}</td>
                 <td className={`py-2 pr-2 text-sm font-semibold ${tone(r.correctness)}`}>

@@ -889,7 +889,7 @@ export function SkillEvaluationCenter({ status, ajd, candidates, onEvaluationDon
                       {s.key === rec?.key ? <span className="ml-2 text-command-action">{winnerBeatsBaseline || inNoise ? "★ recommended" : "★ best skill"}</span> : null}
                       {securityWarning(laneFor(s.key)?.candidate.risk_flags) ? (
                         <span className="ml-2 rounded border border-red-400/50 bg-red-400/10 px-1.5 text-[10px] font-semibold text-red-300" title={securityWarning(laneFor(s.key)?.candidate.risk_flags) ?? ""}>
-                          ⚠ code
+                          ⚠ review
                         </span>
                       ) : null}
                     </td>
