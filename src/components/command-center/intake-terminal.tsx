@@ -17,6 +17,22 @@ const SHOW_AGENT_SCORECARD = false;
 import { Candidate } from "../../lib/research-agent/mock";
 import { CandidateEvaluationResult } from "../../lib/evaluation-agent/mock";
 import { buildDefaultAssumptions, calculateROI } from "../../lib/scorecard/roi";
+
+// One-click examples, so a first-time visitor never faces an empty box. The tool then generates its own test cases.
+const EXAMPLE_NEEDS = [
+  {
+    label: "הצעות מחיר",
+    text: 'אני צריך סקיל שמכין הצעות מחיר בעברית ללקוחות של חברת ריהוט משרדי: לפי המחירון המאושר בלבד (כיסא 300 ש"ח, שולחן 1,200 ש"ח), הנחת כמות 10% על כיסאות מ-10 יחידות, משלוח 250 ש"ח להזמנה, מע"מ 18%, תנאי תשלום שוטף 30. אם פריט לא במחירון – לעצור ולבקש מחיר. התוצאה בטבלה.'
+  },
+  {
+    label: "בדיקת חשבוניות ספקים",
+    text: 'אני צריך סקיל שבודק חשבוניות של ספקים מול המחירון המוסכם: כל שורה שהמחיר בה גבוה מהמוסכם ביותר מ-2%, פריט שלא קיים בהסכם, וחיוב כפול של אותה שורה. התוצאה: טבלת חריגים עם מספר החשבונית, השורה, המחיר המוסכם והמחיר בפועל, ואחריה סיכום של כמה שורות תקינות.'
+  },
+  {
+    label: "Customer replies",
+    text: "I need a skill that drafts replies to customer complaints for our online shop: apologize once, never promise a refund above our policy (full refund within 30 days, store credit after that), offer a replacement when the item is in stock, ask for the order number if it is missing, and keep the reply under 120 words in the customer's language."
+  }
+];
 import { useUIMode } from "./ui-mode-context";
 
 const TYPEWRITER_TEXT = "skill-intake> context mapping online... awaiting business need";
@@ -332,6 +348,20 @@ export function IntakeTerminal() {
           placeholder="Example: I need a skill that checks supplier invoices against our agreed price list"
           className="min-h-28 w-full resize-y rounded-lg border border-command-border bg-command-bg px-3 py-3 font-mono text-sm text-command-text outline-none ring-0 placeholder:text-command-muted/80 focus:border-command-action"
         />
+
+        <div className="flex flex-wrap items-center gap-2">
+          <span className="font-mono text-[11px] uppercase tracking-[0.14em] text-command-muted">Try an example:</span>
+          {EXAMPLE_NEEDS.map((ex) => (
+            <button
+              key={ex.label}
+              type="button"
+              onClick={() => setBusinessNeed(ex.text)}
+              className="rounded-full border border-command-border px-3 py-1 text-xs text-command-text transition hover:border-command-action hover:text-command-action"
+            >
+              {ex.label}
+            </button>
+          ))}
+        </div>
 
         <div className="flex flex-wrap items-center gap-2">
           <button
