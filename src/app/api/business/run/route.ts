@@ -42,12 +42,27 @@ export async function POST(request: Request) {
     // One pinned model for every option, so differences come from the skill only. The fast model keeps test runs
     // cheap; the comparison stays fair because every option (and the no-skill baseline) runs on it.
     const model = process.env.APA_MODEL_FAST?.trim() || "claude-haiku-5-5";
-    const response = await anthropic.messages.create({
-      model,
-      max_tokens: 4000,
-      system: body.skill_md?.trim() ? withSkill(body.skill_md) : BASE,
-      messages: [{ role: "user", content: user }]
-    });
+    // Reports from a whole sheet (a table per product plus a summary per supplier) are long in Hebrew; 4,000 tokens
+    // cut them off mid-table. Transient failures (rate limit, overload) are retried on the same model.
+    let response: Awaited<ReturnType<typeof anthropic.messages.create>> | null = null;
+    let lastError: unknown;
+    for (let attempt = 0; attempt < 3 && !response; attempt += 1) {
+      if (attempt > 0) await new Promise((r) => setTimeout(r, 2000 * 2 ** (attempt - 1) + Math.random() * 800));
+      try {
+        response = await anthropic.messages.create({
+          model,
+          max_tokens: 10000,
+          system: body.skill_md?.trim() ? withSkill(body.skill_md) : BASE,
+          messages: [{ role: "user", content: user }]
+        });
+      } catch (error) {
+        lastError = error;
+        const status = (error as { status?: number })?.status;
+        console.warn("[business/run] attempt", attempt + 1, status ?? "", error instanceof Error ? error.message : error);
+        if (status && status >= 400 && status < 500 && status !== 408 && status !== 409 && status !== 429) break;
+      }
+    }
+    if (!response || !("content" in response)) throw lastError instanceof Error ? lastError : new Error("Run failed");
     const output = response.content
       .map((b) => (b.type === "text" ? b.text : ""))
       .join("\n")

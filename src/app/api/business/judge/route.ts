@@ -48,7 +48,7 @@ export async function POST(request: Request) {
       `REFERENCE DATA:\n"""${(body.reference_data || "(none)").slice(0, 20000)}"""`;
     const own =
       `REQUEST:\n"""${(body.input || "").slice(0, 5000)}"""\n\n` +
-      `WORK TO CHECK:\n"""${body.output.slice(0, 12000)}"""\n\n` +
+      `WORK TO CHECK:\n"""${body.output.slice(0, 24000)}"""\n\n` +
       "Submit verdicts (one per rule id), invented, asked_for_missing, did_task and note.";
 
     // The answer comes back as a forced tool call against a schema (one pinned judge model, retried on transient
