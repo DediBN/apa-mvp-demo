@@ -55,6 +55,12 @@ export async function POST(request: Request) {
     // One pinned judge model, no fallback chain, so every output in a run is judged the same way.
     const model = process.env.APA_JUDGE_MODEL?.trim() || process.env.APA_SKILLS_MODEL?.trim() || "claude-sonnet-5";
     const anthropic = createAnthropicClient();
+    // Transient failures (rate limit, overload, a malformed answer) are retried with backoff on the same model.
+    let parsed: { verdicts: Record<string, string>; invented: string[]; asked_for_missing: string[]; did_task?: boolean; note: string } | null = null;
+    let lastError: unknown;
+    for (let attempt = 0; attempt < 3 && !parsed; attempt += 1) {
+      if (attempt > 0) await new Promise((r) => setTimeout(r, 2000 * 2 ** (attempt - 1) + Math.random() * 800));
+      try {
     const response = await anthropic.messages.create({
       model,
       max_tokens: 2000,
@@ -70,7 +76,15 @@ export async function POST(request: Request) {
       ]
     });
     const text = response.content.map((b) => (b.type === "text" ? b.text : "")).join("\n");
-    const parsed = extractJsonObject<{ verdicts: Record<string, string>; invented: string[]; asked_for_missing: string[]; did_task?: boolean; note: string }>(text);
+    parsed = extractJsonObject<{ verdicts: Record<string, string>; invented: string[]; asked_for_missing: string[]; did_task?: boolean; note: string }>(text);
+      } catch (error) {
+        lastError = error;
+        const status = (error as { status?: number })?.status;
+        console.warn("[business/judge] attempt", attempt + 1, status ?? "", error instanceof Error ? error.message : error);
+        if (status && status >= 400 && status < 500 && status !== 408 && status !== 409 && status !== 429) break;
+      }
+    }
+    if (!parsed) throw lastError instanceof Error ? lastError : new Error("Judge failed");
 
     const verdicts: Record<string, RuleVerdict> = {};
     for (const rule of rules) {
@@ -86,7 +100,8 @@ export async function POST(request: Request) {
     });
     return NextResponse.json({ ...judged, note: parsed.note?.trim() || "", model });
   } catch (error) {
-    console.error("[business/judge]", error instanceof Error ? error.message : error);
-    return NextResponse.json({ error: "The check failed. Please run again." }, { status: 500 });
+    const detail = error instanceof Error ? error.message : String(error);
+    console.error("[business/judge]", detail);
+    return NextResponse.json({ error: "The check failed. Please run again.", detail: detail.slice(0, 300) }, { status: 500 });
   }
 }

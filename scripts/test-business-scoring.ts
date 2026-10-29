@@ -142,4 +142,10 @@ test("a library skill only slightly better than the custom skill does not replac
   assert.equal(r.reason, "custom_preferred");
 });
 
+test("no scores at all is not reported as 'nobody did the task'", () => {
+  const r = recommend([]);
+  assert.equal(r.key, null);
+  assert.equal(r.reason, "no_eligible");
+});
+
 console.log(`\n${passed} tests passed`);

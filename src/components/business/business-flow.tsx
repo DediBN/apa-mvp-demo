@@ -77,7 +77,7 @@ function stripFrontmatter(md: string): string {
 }
 
 export function BusinessFlow() {
-  const { t, lang } = useLang();
+  const { t, lang, setLang } = useLang();
   const [step, setStep] = useState(1);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -175,6 +175,8 @@ export function BusinessFlow() {
         ui_language: lang
       });
       setInterview(data);
+      // The screens follow the language the request was written in.
+      if (data.language !== lang) setLang(data.language);
       setUsedSheets(d?.sheets ? pickSheets(d.sheets, data.relevant_sheets).map((s) => s.name) : []);
       setAnswers(Object.fromEntries(data.questions.map((q) => [q.id, { answer: "", fromDefault: false, skipped: false }])));
       setRules(null);

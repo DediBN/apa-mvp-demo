@@ -139,8 +139,10 @@ export function recommend(options: OptionResult[]): Recommendation {
   const baseline = options.find((o) => o.kind === "baseline");
   const eligible = options.filter(isEligible);
   if (eligible.length === 0) {
-    const anyDone = options.some((o) => o.kind !== "baseline" && didTheTask(o));
-    return { key: null, improvement: "none", reason: anyDone ? "no_eligible" : "not_done" };
+    // "not_done" only when options were actually measured and none of them did the task; no scores at all is a failure.
+    const tried = options.filter((o) => o.kind !== "baseline");
+    const noneDone = tried.length > 0 && tried.every((o) => !didTheTask(o));
+    return { key: null, improvement: "none", reason: noneDone ? "not_done" : "no_eligible" };
   }
 
   const val = (n: number | null) => (n === null ? -1 : n);
