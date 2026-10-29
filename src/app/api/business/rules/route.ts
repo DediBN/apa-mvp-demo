@@ -47,7 +47,7 @@ export async function POST(request: Request) {
         `KNOWN RULES:\n${known.map((k) => `${k.id} [${k.kind}] ${k.text}`).join("\n") || "(none)"}\n\n` +
         `ANSWERS:\n${answers.map((a) => `${a.id} Q: ${a.question}\n   A: ${a.answer}`).join("\n") || "(none)"}\n\n` +
         'Return {"rules":[{"text":"","kind":"business","from":["K1"]}],"output_format":""}',
-      2500,
+      4000,
       { fast: true }
     );
 

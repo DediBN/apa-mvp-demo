@@ -65,7 +65,7 @@ export async function POST(request: Request) {
         { type: "text", text: shared, cache_control: { type: "ephemeral" } },
         { type: "text", text: own }
       ],
-      2000,
+      3000,
       {
         type: "object",
         properties: {

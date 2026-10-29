@@ -80,7 +80,8 @@ export async function POST(request: Request) {
         'Return {"language":"he","task_title":"","task_summary":"","known_rules":[{"id":"K1","text":"","kind":"business","source":"user"}],' +
         '"questions":[{"id":"Q1","question":"","why":"","options":[""],"suggested_default":""}],' +
         '"feasibility":{"status":"ok","reason":"","needs":""},"relevant_sheets":[]}',
-      2500,
+      // Hebrew answers are token-heavy; 2,500 cut the JSON off mid-answer.
+      4000,
       { fast: true }
     );
     const sheetNames = new Set(body.document_sheets ?? []);
