@@ -65,7 +65,8 @@ async function planQueries(jobTitle: string, mission: string, kpis: SkillScanReq
         "Queries must be in English even if the input is in another language.",
       `job_title: ${jobTitle}\nmission: ${mission}\nkpis: ${JSON.stringify(kpis ?? [])}\n` +
         'Return {"semantic_query": "<one natural-language sentence describing the skill needed>", "keyword_queries": ["<2-3 words>", "<2-3 words>", "<2-3 words>"]}',
-      400
+      400,
+      { fast: true }
     );
     if (plan.semantic_query && Array.isArray(plan.keyword_queries)) {
       return { semantic_query: plan.semantic_query, keyword_queries: plan.keyword_queries.filter(Boolean).slice(0, 3) };
@@ -191,7 +192,10 @@ export async function POST(request: Request) {
             "- 40-59: covers a real part of the task (a sub-step or the output format), not the whole task.\n" +
             "- 10-39: shares words or a general area only (e.g. cloud-service pricing for a furniture price quote; a generic writing or editing skill for a calculation task).\n" +
             "- 0-9: unrelated.\n" +
-            "A skill that depends on tools, APIs or data sources the business does not have scores at most 30.",
+            "A skill that depends on tools, APIs or data sources the business does not have scores at most 30.\n" +
+            "Domain matters as much as the task: a skill built for a different kind of item, data or business than the job's " +
+            "(e.g. grocery prices for a cinema-ticket price comparison, Azure pricing for a furniture quote) scores at most 39, " +
+            "even when the task type (price comparison, quoting) is the same.",
           `JOB DESCRIPTION\njob_title: ${jobTitle}\nmission: ${mission}\nkpis: ${JSON.stringify(body.kpis ?? [])}\n\n` +
             `CANDIDATE SKILLS\n${dossier}\n\n` +
             'Return {"results":[{"index":0,"fit_score":0-100,"fit_reason":"one line, concrete","gaps":"one line: what the job needs that this skill does not cover"}]} for every candidate.',

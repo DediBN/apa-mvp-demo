@@ -5,6 +5,10 @@ import { createAnthropicClient } from "../anthropic-client";
 const MODEL_CHAIN = [process.env.APA_SKILLS_MODEL?.trim(), "claude-sonnet-5-5", "claude-sonnet-5", "claude-sonnet-4-6"].filter(
   (m): m is string => Boolean(m)
 );
+// Fast, low-cost chain for steps that read and sort rather than write the skill or judge it. Override with APA_MODEL_FAST.
+export const FAST_MODEL_CHAIN = [process.env.APA_MODEL_FAST?.trim(), "claude-haiku-5-5", "claude-haiku-4-5"].filter(
+  (m): m is string => Boolean(m)
+);
 
 export function extractJsonObject<T>(text: string): T {
   const cleaned = text.replace(/```json|```/g, "").trim();
@@ -20,10 +24,10 @@ export function extractJsonObject<T>(text: string): T {
   }
 }
 
-export async function claudeJson<T>(system: string, user: string, maxTokens = 1500): Promise<T> {
+export async function claudeJson<T>(system: string, user: string, maxTokens = 1500, opts: { fast?: boolean } = {}): Promise<T> {
   const anthropic = createAnthropicClient();
   let lastError: unknown;
-  for (const model of MODEL_CHAIN) {
+  for (const model of opts.fast ? FAST_MODEL_CHAIN : MODEL_CHAIN) {
     try {
       const response = await anthropic.messages.create({
         model,

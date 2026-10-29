@@ -39,8 +39,9 @@ export async function POST(request: Request) {
       (body.reference_data?.trim() ? `\n\n---\n${body.reference_data.trim()}` : "");
 
     const anthropic = createAnthropicClient();
-    // One pinned model for every option, so differences come from the skill only.
-    const model = process.env.APA_SKILLS_MODEL?.trim() || "claude-sonnet-5";
+    // One pinned model for every option, so differences come from the skill only. The fast model keeps test runs
+    // cheap; the comparison stays fair because every option (and the no-skill baseline) runs on it.
+    const model = process.env.APA_MODEL_FAST?.trim() || "claude-haiku-5-5";
     const response = await anthropic.messages.create({
       model,
       max_tokens: 4000,

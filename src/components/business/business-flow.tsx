@@ -5,6 +5,7 @@
 
 import { useRef, useState } from "react";
 import { readUploadAsText, UPLOAD_ACCEPT } from "../../lib/files/read-upload";
+import { pickSheets, readSheets, SHEET_EXTENSIONS, sheetsPreview, sheetsText, type Sheet } from "../../lib/files/sheets";
 import { buildZip, skillFolderName } from "../../lib/skills/zip";
 import { doneShare, MIN_FIT, recommend, scoreOption, type JudgedOutput, type OptionResult, type Recommendation, type Rule } from "../../lib/business/scoring";
 import { Markdown } from "./markdown";
@@ -24,6 +25,7 @@ interface Interview {
   known_rules: Array<{ id: string; text: string; kind: "business" | "format"; source: "user" | "document" }>;
   questions: Question[];
   feasibility?: { status: "ok" | "needs_file" | "not_possible"; reason: string; needs: string };
+  relevant_sheets?: string[];
 }
 interface Answer {
   answer: string;
@@ -61,6 +63,7 @@ async function post<T>(url: string, body: unknown): Promise<T> {
 }
 
 const MAX_DOC_CHARS = 15000;
+const MAX_SHEET_CHARS = 20000; // the chosen sheets, sent to building, testing and checking
 
 function stripFrontmatter(md: string): string {
   return md.replace(/^---[\s\S]*?---\s*/, "").trim();
@@ -74,7 +77,8 @@ export function BusinessFlow() {
 
   // step 1
   const [request, setRequest] = useState("");
-  const [doc, setDoc] = useState<{ name: string; text: string; note?: string } | null>(null);
+  const [doc, setDoc] = useState<{ name: string; text: string; note?: string; sheets?: Sheet[] } | null>(null);
+  const [usedSheets, setUsedSheets] = useState<string[]>([]);
   const [docBusy, setDocBusy] = useState(false);
 
   // step 2
@@ -108,8 +112,14 @@ export function BusinessFlow() {
     setDocBusy(true);
     setError(null);
     try {
-      const { text, note } = await readUploadAsText(file, MAX_DOC_CHARS);
-      setDoc({ name: file.name, text, note });
+      const ext = file.name.split(".").pop()?.toLowerCase() ?? "";
+      if (SHEET_EXTENSIONS.includes(ext)) {
+        const sheets = await readSheets(file);
+        setDoc({ name: file.name, text: "", sheets, note: sheets.length > 1 ? `${sheets.length} sheets` : undefined });
+      } else {
+        const { text, note } = await readUploadAsText(file, MAX_DOC_CHARS);
+        setDoc({ name: file.name, text, note });
+      }
     } catch (e) {
       setError(e instanceof Error ? e.message : t.errorGeneric);
     } finally {
@@ -135,8 +145,14 @@ export function BusinessFlow() {
     setBusy(true);
     setError(null);
     try {
-      const data = await post<Interview>("/api/business/interview", { request, document_text: doc?.text, ui_language: lang });
+      const data = await post<Interview>("/api/business/interview", {
+        request,
+        document_text: doc?.sheets ? sheetsPreview(doc.sheets) : doc?.text,
+        document_sheets: doc?.sheets?.map((s) => s.name),
+        ui_language: lang
+      });
       setInterview(data);
+      setUsedSheets(doc?.sheets ? pickSheets(doc.sheets, data.relevant_sheets).map((s) => s.name) : []);
       setAnswers(Object.fromEntries(data.questions.map((q) => [q.id, { answer: "", fromDefault: false, skipped: false }])));
       setRules(null);
       setApproved(false);
@@ -193,8 +209,17 @@ export function BusinessFlow() {
     try {
       setProgress(0);
       const common = { language: interview.language, task_title: interview.task_title, task_summary: interview.task_summary, rules: finalRules, missing, output_format: outputFormat };
-      const buildP = post<{ skill_md: string; name: string }>("/api/business/build", { ...common, document_text: doc?.text, document_name: doc?.name });
-      const casesP = post<{ cases: TestCase[] }>("/api/business/cases", { ...common, document_text: doc?.text });
+      // A spreadsheet is the business's own data: the skill gets a preview of the chosen sheets (it must not copy the
+      // rows), the tests get the chosen sheets in full. Other documents are reference material, used as they are.
+      const chosen = doc?.sheets ? pickSheets(doc.sheets, usedSheets) : null;
+      const dataText = chosen ? sheetsText(chosen, MAX_SHEET_CHARS).text : doc?.text;
+      const buildP = post<{ skill_md: string; name: string }>("/api/business/build", {
+        ...common,
+        document_text: chosen ? sheetsPreview(chosen) : doc?.text,
+        document_kind: chosen ? "data" : "reference",
+        document_name: doc?.name
+      });
+      const casesP = post<{ cases: TestCase[] }>("/api/business/cases", { ...common, document_text: dataText });
       const skill = await buildP;
       setProgress(1);
       const { cases: cs } = await casesP;
@@ -224,24 +249,25 @@ export function BusinessFlow() {
       );
 
       setProgress(3);
+      const judgeOne = (o: Option, i: number) =>
+        o.outputs[i]
+          ? post<JudgedOutput & { note: string }>("/api/business/judge", {
+              task_summary: interview.task_summary,
+              rules: finalRules,
+              input: cs[i].input,
+              reference_data: cs[i].reference_data,
+              output: o.outputs[i]
+            }).catch((e: Error) => {
+              fails.push(`${o.name}: ${e.message}`);
+              return null;
+            })
+          : Promise.resolve(null);
+      // The first check runs alone so it stores the shared part (rules + data) in the cache; the rest read it.
+      const firstIdx = opts[0].outputs.findIndex(Boolean);
+      const first = firstIdx >= 0 ? await judgeOne(opts[0], firstIdx) : null;
       await Promise.all(
-        opts.map(async (o) => {
-          o.judged = await Promise.all(
-            cs.map((c, i) =>
-              o.outputs[i]
-                ? post<JudgedOutput & { note: string }>("/api/business/judge", {
-                    task_summary: interview.task_summary,
-                    rules: finalRules,
-                    input: c.input,
-                    reference_data: c.reference_data,
-                    output: o.outputs[i]
-                  }).catch((e: Error) => {
-                    fails.push(`${o.name}: ${e.message}`);
-                    return null;
-                  })
-                : Promise.resolve(null)
-            )
-          );
+        opts.map(async (o, k) => {
+          o.judged = await Promise.all(cs.map((_, i) => (k === 0 && i === firstIdx ? Promise.resolve(first) : judgeOne(o, i))));
         })
       );
 
@@ -304,6 +330,7 @@ export function BusinessFlow() {
     setStep(1);
     setRequest("");
     setDoc(null);
+    setUsedSheets([]);
     setInterview(null);
     setRules(null);
     setOptions([]);
@@ -439,6 +466,29 @@ export function BusinessFlow() {
 
           {gate !== "ok" && !overrideGate ? null : (
           <>
+          {doc?.sheets && doc.sheets.length > 1 ? (
+            <div className="mt-6">
+              <h3 className="font-semibold">{t.s2Sheets}</h3>
+              <p className="mt-0.5 text-xs text-command-muted">{t.s2SheetsHint}</p>
+              <div className="mt-2 flex flex-wrap gap-2">
+                {doc.sheets.map((sh) => {
+                  const on = usedSheets.includes(sh.name);
+                  return (
+                    <button
+                      key={sh.name}
+                      type="button"
+                      aria-pressed={on}
+                      className={chip(on)}
+                      onClick={() => setUsedSheets(on ? usedSheets.filter((n) => n !== sh.name) : [...usedSheets, sh.name])}
+                    >
+                      {sh.name} · {sh.rows}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          ) : null}
+
           <h3 className="mt-6 font-semibold">{t.s2Known}</h3>
           {interview.known_rules.length === 0 ? (
             <p className="mt-1 text-sm text-command-muted">{t.s2KnownEmpty}</p>

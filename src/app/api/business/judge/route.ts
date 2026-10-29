@@ -42,9 +42,13 @@ export async function POST(request: Request) {
     if (!body.output?.trim() || rules.length === 0) {
       return NextResponse.json({ error: "output and rules are required" }, { status: 400 });
     }
-    const user =
+    // The part shared by every check in a run (task, rules, reference data) comes first and is cached, so only the
+    // first check pays for it in full; the request and the work to check follow.
+    const shared =
       `TASK: ${body.task_summary ?? ""}\n\nRULES:\n${rules.map((r) => `${r.id} [${r.kind}] ${r.text}`).join("\n")}\n\n` +
-      `REQUEST:\n"""${(body.input || "").slice(0, 5000)}"""\n\nREFERENCE DATA:\n"""${(body.reference_data || "(none)").slice(0, 12000)}"""\n\n` +
+      `REFERENCE DATA:\n"""${(body.reference_data || "(none)").slice(0, 20000)}"""`;
+    const own =
+      `REQUEST:\n"""${(body.input || "").slice(0, 5000)}"""\n\n` +
       `WORK TO CHECK:\n"""${body.output.slice(0, 12000)}"""\n\n` +
       'Return {"verdicts":{"R1":"met"},"invented":[""],"asked_for_missing":[""],"did_task":true,"note":"one plain sentence"}';
 
@@ -55,7 +59,15 @@ export async function POST(request: Request) {
       model,
       max_tokens: 2000,
       system: `${SYSTEM}\nRespond with strict JSON only.`,
-      messages: [{ role: "user", content: user }]
+      messages: [
+        {
+          role: "user",
+          content: [
+            { type: "text", text: shared, cache_control: { type: "ephemeral" } },
+            { type: "text", text: own }
+          ]
+        }
+      ]
     });
     const text = response.content.map((b) => (b.type === "text" ? b.text : "")).join("\n");
     const parsed = extractJsonObject<{ verdicts: Record<string, string>; invented: string[]; asked_for_missing: string[]; did_task?: boolean; note: string }>(text);

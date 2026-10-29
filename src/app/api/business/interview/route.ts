@@ -12,6 +12,7 @@ interface InterviewRequest {
   request?: string;
   document_text?: string;
   ui_language?: "en" | "he";
+  document_sheets?: string[]; // when the document is a spreadsheet preview: its sheet names
 }
 
 export interface InterviewQuestion {
@@ -31,11 +32,13 @@ export interface InterviewResponse {
   // Can a skill do this with what the business gives it? "not_possible": needs live outside data or access to
   // systems a skill cannot provide. "needs_file": needs the business's own data, and no document was attached.
   feasibility: { status: "ok" | "needs_file" | "not_possible"; reason: string; needs: string };
+  relevant_sheets: string[]; // sheets of the attached spreadsheet that this task needs (empty when not a spreadsheet)
 }
 
 const SYSTEM = `You help a small-business employee who is not technical turn a short request into a precise work procedure for an AI assistant.
 
-Read the REQUEST and the optional DOCUMENT (a price list, policy, example, template...).
+Read the REQUEST and the optional DOCUMENT (a price list, policy, example, template...). When the DOCUMENT is a
+spreadsheet, you see only a preview: each sheet's name, row count, header and first rows. The full data is used later.
 
 1. language: the language of the REQUEST ("he" for Hebrew, else "en"). Write everything in that language.
 2. task_title: 3-6 words. task_summary: one plain sentence of what the AI will do.
@@ -60,7 +63,9 @@ Read the REQUEST and the optional DOCUMENT (a price list, policy, example, templ
      invoices, price list...) and no DOCUMENT was attached.
    - status "ok": otherwise (including writing, drafting, calculating or checking from what the user will paste).
    reason: one plain sentence, what is missing ("" when ok). needs: one plain sentence, what would make it work
-   (e.g. "Attach your stock sheet" or "A tool connected to the cinemas' websites, not a skill") ("" when ok).`;
+   (e.g. "Attach your stock sheet" or "A tool connected to the cinemas' websites, not a skill") ("" when ok).
+6. relevant_sheets: when the DOCUMENT is a spreadsheet preview, the exact names of the sheets this task needs
+   (include sheets it must look things up in). Otherwise [].`;
 
 export async function POST(request: Request) {
   try {
@@ -74,9 +79,11 @@ export async function POST(request: Request) {
       `REQUEST:\n"""${req.slice(0, 4000)}"""\n\nDOCUMENT:\n"""${(body.document_text || "(none)").slice(0, 15000)}"""\n\n` +
         'Return {"language":"he","task_title":"","task_summary":"","known_rules":[{"id":"K1","text":"","kind":"business","source":"user"}],' +
         '"questions":[{"id":"Q1","question":"","why":"","options":[""],"suggested_default":""}],' +
-        '"feasibility":{"status":"ok","reason":"","needs":""}}',
-      2500
+        '"feasibility":{"status":"ok","reason":"","needs":""},"relevant_sheets":[]}',
+      2500,
+      { fast: true }
     );
+    const sheetNames = new Set(body.document_sheets ?? []);
     const language = result.language === "en" ? "en" : "he";
     return NextResponse.json({
       language,
@@ -105,7 +112,8 @@ export async function POST(request: Request) {
         status: (["ok", "needs_file", "not_possible"] as const).includes(result.feasibility?.status) ? result.feasibility.status : "ok",
         reason: result.feasibility?.reason?.trim() || "",
         needs: result.feasibility?.needs?.trim() || ""
-      }
+      },
+      relevant_sheets: (result.relevant_sheets ?? []).filter((n) => sheetNames.has(n))
     } satisfies InterviewResponse);
   } catch (error) {
     console.error("[business/interview]", error instanceof Error ? error.message : error);

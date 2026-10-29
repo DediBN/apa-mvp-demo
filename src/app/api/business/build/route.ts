@@ -15,6 +15,9 @@ interface BuildRequest {
   output_format?: string;
   document_text?: string;
   document_name?: string;
+  // "data": the business's own records (a spreadsheet), attached every time the skill is used — document_text is
+  // then a preview (header and first rows of the sheets the task uses). "reference": a fixed document to embed.
+  document_kind?: "data" | "reference";
 }
 
 const MODEL_CHAIN = [process.env.APA_SKILLS_MODEL?.trim(), "claude-sonnet-5-5", "claude-sonnet-5", "claude-sonnet-4-6"].filter(
@@ -37,6 +40,8 @@ Then the instructions, in the business's language, for an AI assistant doing thi
 - For every OPEN POINT listed, tell the assistant to ask the user about it when it matters.
 - The result's format, only as given in the format rules.
 - If REFERENCE DATA is given, include it in a section "Reference data" with one line saying to replace it when it changes.
+- If a DATA FILE preview is given instead, the business attaches that file every time it uses the skill. Name the
+  sheets and columns to use and say exactly how to use them. Do NOT copy its rows or numbers into the skill.
 - No scripts, no code to run, no network. Plain Markdown. Under 900 words plus the reference data.`;
 
 export async function POST(request: Request) {
@@ -54,7 +59,9 @@ export async function POST(request: Request) {
       `APPROVED FORMAT RULES:\n${rules.filter((r) => r.kind === "format").map((r) => `- ${r.text}`).join("\n") || "(none)"}\n` +
       `${body.output_format ? `Expected result: ${body.output_format}\n` : ""}\n` +
       `OPEN POINTS (not answered by the business):\n${(body.missing ?? []).map((m) => `- ${m}`).join("\n") || "(none)"}\n\n` +
-      `REFERENCE DATA${body.document_name ? ` (${body.document_name})` : ""}:\n"""${reference.slice(0, 8000) || "(none)"}"""`;
+      (body.document_kind === "data"
+        ? `DATA FILE PREVIEW${body.document_name ? ` (${body.document_name})` : ""}:\n"""${reference.slice(0, 8000)}"""\n\nREFERENCE DATA:\n"""(none)"""`
+        : `REFERENCE DATA${body.document_name ? ` (${body.document_name})` : ""}:\n"""${reference.slice(0, 8000) || "(none)"}"""`);
 
     const anthropic = createAnthropicClient();
     let lastError: unknown;

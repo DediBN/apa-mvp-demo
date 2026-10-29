@@ -1,9 +1,12 @@
 // Reads an uploaded file into text the pipeline can work with.
 // - Text formats (CSV, TXT, MD, JSON, TSV): read directly in the browser.
 // - PDF and images: sent to /api/files/extract, where Claude transcribes them.
-// - Anything else binary (Excel, Word, ...): rejected with a clear message instead of turning into gibberish.
+// - Excel: read in the browser (SheetJS), every sheet as CSV text. No Claude call.
+// - Anything else binary (Word, ...): rejected with a clear message instead of turning into gibberish.
 
-export const UPLOAD_ACCEPT = ".txt,.csv,.tsv,.md,.json,.pdf,.png,.jpg,.jpeg,.webp,.gif";
+import { readSheets, sheetsText } from "./sheets";
+
+export const UPLOAD_ACCEPT = ".xlsx,.xlsm,.xls,.txt,.csv,.tsv,.md,.json,.pdf,.png,.jpg,.jpeg,.webp,.gif";
 
 const IMAGE_TYPES: Record<string, string> = { png: "image/png", jpg: "image/jpeg", jpeg: "image/jpeg", webp: "image/webp", gif: "image/gif" };
 const MAX_TEXT_BYTES = 2_000_000;
@@ -55,12 +58,13 @@ export async function readUploadAsText(file: File, maxChars: number): Promise<{ 
     return { text: data.text.slice(0, maxChars), note: notes.join(" ") };
   }
 
-  if (["xlsx", "xls", "docx", "doc", "pptx", "zip"].includes(ext)) {
-    throw new Error(
-      ext.startsWith("xls")
-        ? "Excel files aren't supported yet — in Excel use File → Save As → CSV, then upload the CSV."
-        : "This format isn't supported yet — save it as PDF (or copy the text) and upload that."
-    );
+  if (["xlsx", "xlsm", "xls"].includes(ext)) {
+    const { text, cut } = sheetsText(await readSheets(file), maxChars);
+    return { text, note: cut ? `File is long; only the first ${maxChars.toLocaleString()} characters are used.` : undefined };
+  }
+
+  if (["docx", "doc", "pptx", "zip"].includes(ext)) {
+    throw new Error("This format isn't supported yet — save it as PDF (or copy the text) and upload that.");
   }
 
   if (file.size > MAX_TEXT_BYTES) {
