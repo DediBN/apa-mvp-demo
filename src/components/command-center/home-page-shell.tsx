@@ -1,5 +1,6 @@
 "use client";
 
+import { useEffect } from "react";
 import { CommandShell } from "./command-shell";
 import { UIModeProvider, useUIMode } from "./ui-mode-context";
 import { BusinessFlow } from "../business/business-flow";
@@ -40,8 +41,16 @@ function LanguageToggle() {
 }
 
 function HomePageContent() {
-  const { mode } = useUIMode();
-  const { t, lang } = useLang();
+  const { mode, setMode } = useUIMode();
+  const { t, lang, setLang } = useLang();
+  // ?lang=he|en sets the language (the landing page passes it); ?mode=technology opens the technical view.
+  useEffect(() => {
+    const q = new URLSearchParams(window.location.search);
+    const l = q.get("lang");
+    if (l === "he" || l === "en") setLang(l);
+    if (q.get("mode") === "technology") setMode("technology");
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
   const business = mode === "business";
 
   return (
@@ -72,7 +81,7 @@ function HomePageContent() {
 export function HomePageShell() {
   return (
     <LangProvider>
-      <UIModeProvider initialMode="technology">
+      <UIModeProvider initialMode="business">
         <HomePageContent />
       </UIModeProvider>
     </LangProvider>

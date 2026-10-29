@@ -3,7 +3,8 @@
 // Business flow: four steps for a non-technical user — need → rules → result & check → get & install.
 // No answer key is asked from the user: the rules they approve are the yardstick.
 
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
+import { takeHandoff } from "../../lib/handoff";
 import { readUploadAsText, UPLOAD_ACCEPT } from "../../lib/files/read-upload";
 import { pickSheets, readSheets, SHEET_EXTENSIONS, sheetsPreview, sheetsText, type Sheet } from "../../lib/files/sheets";
 import { buildZip, skillFolderName } from "../../lib/skills/zip";
@@ -26,6 +27,12 @@ interface Interview {
   questions: Question[];
   feasibility?: { status: "ok" | "needs_file" | "not_possible"; reason: string; needs: string };
   relevant_sheets?: string[];
+}
+interface Doc {
+  name: string;
+  text: string;
+  note?: string;
+  sheets?: Sheet[];
 }
 interface Answer {
   answer: string;
@@ -77,7 +84,7 @@ export function BusinessFlow() {
 
   // step 1
   const [request, setRequest] = useState("");
-  const [doc, setDoc] = useState<{ name: string; text: string; note?: string; sheets?: Sheet[] } | null>(null);
+  const [doc, setDoc] = useState<Doc | null>(null);
   const [usedSheets, setUsedSheets] = useState<string[]>([]);
   const [docBusy, setDocBusy] = useState(false);
 
@@ -107,25 +114,41 @@ export function BusinessFlow() {
 
   const contentLang = interview?.language ?? (lang === "he" ? "he" : "en");
 
-  async function onFile(file: File | undefined) {
-    if (!file) return;
+  async function onFile(file: File | undefined): Promise<Doc | null> {
+    if (!file) return null;
     setDocBusy(true);
     setError(null);
     try {
       const ext = file.name.split(".").pop()?.toLowerCase() ?? "";
+      let d: Doc;
       if (SHEET_EXTENSIONS.includes(ext)) {
         const sheets = await readSheets(file);
-        setDoc({ name: file.name, text: "", sheets, note: sheets.length > 1 ? `${sheets.length} sheets` : undefined });
+        d = { name: file.name, text: "", sheets, note: sheets.length > 1 ? `${sheets.length} ${t.sheetsWord}` : undefined };
       } else {
         const { text, note } = await readUploadAsText(file, MAX_DOC_CHARS);
-        setDoc({ name: file.name, text, note });
+        d = { name: file.name, text, note };
       }
+      setDoc(d);
+      return d;
     } catch (e) {
       setError(e instanceof Error ? e.message : t.errorGeneric);
+      return null;
     } finally {
       setDocBusy(false);
     }
   }
+
+  // Coming from the landing page: the request (and file) are already given, so start understanding right away.
+  useEffect(() => {
+    const h = takeHandoff();
+    if (!h) return;
+    setRequest(h.request);
+    (async () => {
+      const d = h.file ? await onFile(h.file) : null;
+      await goInterview(h.request, d);
+    })();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   function startSourcing(title: string, summary: string) {
     sourcing.current = post<{ candidates: Array<{ name: string; source: string; fit_score_pre_eval: number; skill?: { content?: string; pageUrl?: string; githubUrl?: string } }> }>(
@@ -141,18 +164,18 @@ export function BusinessFlow() {
       .catch(() => null);
   }
 
-  async function goInterview() {
+  async function goInterview(req: string = request, d: Doc | null = doc) {
     setBusy(true);
     setError(null);
     try {
       const data = await post<Interview>("/api/business/interview", {
-        request,
-        document_text: doc?.sheets ? sheetsPreview(doc.sheets) : doc?.text,
-        document_sheets: doc?.sheets?.map((s) => s.name),
+        request: req,
+        document_text: d?.sheets ? sheetsPreview(d.sheets) : d?.text,
+        document_sheets: d?.sheets?.map((s) => s.name),
         ui_language: lang
       });
       setInterview(data);
-      setUsedSheets(doc?.sheets ? pickSheets(doc.sheets, data.relevant_sheets).map((s) => s.name) : []);
+      setUsedSheets(d?.sheets ? pickSheets(d.sheets, data.relevant_sheets).map((s) => s.name) : []);
       setAnswers(Object.fromEntries(data.questions.map((q) => [q.id, { answer: "", fromDefault: false, skipped: false }])));
       setRules(null);
       setApproved(false);
@@ -418,7 +441,7 @@ export function BusinessFlow() {
             ) : null}
           </div>
           <div className="mt-6 flex flex-wrap items-center gap-4">
-            <button type="button" className={primary} disabled={!request.trim() || busy || docBusy} onClick={goInterview}>
+            <button type="button" className={primary} disabled={!request.trim() || busy || docBusy} onClick={() => goInterview()}>
               {busy ? t.s1Working : t.s1Primary}
             </button>
             <p className="text-sm text-command-muted">
