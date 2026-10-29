@@ -10,7 +10,7 @@ import type { GeneratedScenario, JudgeResponse, OptionScore } from "../../lib/sk
 import { buildZip, skillFolderName } from "../../lib/skills/zip";
 import { StatusPill } from "../ui/status-pill";
 import { pool, scoreRun, spread, withinNoise, type Issue, type RunJudgement } from "../../lib/skills/tech-scoring";
-import { recommend, type OptionResult } from "../../lib/business/scoring";
+import { MIN_FIT, recommend, type OptionResult } from "../../lib/business/scoring";
 import { Markdown } from "../business/markdown";
 import { securityWarning } from "../../lib/skills/security";
 import { encodeReport, type SharedReport } from "../../lib/skills/share";
@@ -377,7 +377,7 @@ export function SkillEvaluationCenter({ status, ajd, candidates, onEvaluationDon
             // A failed judgement is retried once, and never counted as a zero.
             for (let attempt = 0; attempt < 2; attempt += 1) {
               try {
-                const j = await postJson<RunJudgement & { verdict: string }>("/api/skills/judge-one", body);
+                const j = await postJson<RunJudgement & { verdict: string; did_task?: boolean }>("/api/skills/judge-one", body);
                 return { ...r, judgement: j };
               } catch {
                 if (attempt === 0) await new Promise((res) => setTimeout(res, 2000));
@@ -436,6 +436,10 @@ export function SkillEvaluationCenter({ status, ajd, candidates, onEvaluationDon
           correctness_max: corr.max,
           format: fmtValues.length ? mean(fmtValues) : null,
           runs: repScores.length,
+          done: (() => {
+            const known = mine.filter((j) => typeof (j.judgement as { did_task?: boolean }).did_task === "boolean");
+            return known.length ? known.filter((j) => (j.judgement as { did_task?: boolean }).did_task).length / known.length : null;
+          })(),
           verdict: first.map((j) => `${multi ? `[${j.setId}] ` : ""}${j.judgement!.verdict}`).join(" ")
         });
       }
@@ -488,8 +492,9 @@ export function SkillEvaluationCenter({ status, ajd, candidates, onEvaluationDon
     const lane = laneFor(key);
     return lane?.kind === "custom" ? 100 : lane?.kind === "baseline" ? 0 : lane?.candidate.fit_score_pre_eval ?? 0;
   };
-  // Recommendation (shared, unit-tested rule): only the custom skill or a directory skill that passed screening
-  // (fit >= 40); rank by correctness, then format; ties go to the custom skill, then to the better fit.
+  // Recommendation (shared, unit-tested rule in lib/business/scoring): fit first (custom skill, or a directory skill
+  // with fit >= MIN_FIT), only options that actually did the task, and a directory skill replaces the custom one
+  // only when clearly better. No option did the task → no recommendation.
   const rec = judge
     ? recommend(
         judge.scores.map(
@@ -500,7 +505,8 @@ export function SkillEvaluationCenter({ status, ajd, candidates, onEvaluationDon
             correctness: s.correctness ?? s.composite,
             format: s.format ?? null,
             invented: s.unsupported,
-            cases: s.runs ?? 1
+            cases: s.runs ?? 1,
+            done: s.done ?? null
           })
         )
       )
@@ -511,10 +517,11 @@ export function SkillEvaluationCenter({ status, ajd, candidates, onEvaluationDon
   const winner = recommendedScore;
   const winnerBeatsBaseline = Boolean(winner && (!baselineScore || (!inNoise && (winner.correctness ?? 0) > (baselineScore.correctness ?? 0))));
   const range = (s: OptionScore) => ((s.runs ?? 1) > 1 ? `${s.correctness_min}–${s.correctness_max}` : "");
-  const recommendedLane =
-    lanes.find((l) => l.candidate.candidate_id === recommendedScore?.key && l.skillMd) ??
-    lanes.find((l) => l.kind === "custom" && l.skillMd) ??
-    lanes.find((l) => l.kind === "directory" && l.skillMd && (l.candidate.fit_score_pre_eval ?? 0) >= 40);
+  const notDone = rec?.reason === "not_done";
+  // Never fall back to a library skill that was not recommended; with no option that did the task, nothing is offered.
+  const recommendedLane = notDone
+    ? undefined
+    : lanes.find((l) => l.candidate.candidate_id === recommendedScore?.key && l.skillMd) ?? lanes.find((l) => l.kind === "custom" && l.skillMd);
   // Options that failed to run, or ran but could not be scored, are listed — never silently dropped.
   const failedLanes = lanes
     .filter((lane) => lane.state === "error" || !lane.result || (judge && !judge.scores.some((sc) => sc.key === lane.candidate.candidate_id)))
@@ -748,6 +755,12 @@ export function SkillEvaluationCenter({ status, ajd, candidates, onEvaluationDon
                     : ""}
                 </p>
               </div>
+            ) : notDone ? (
+              <p className="text-sm text-command-text">
+                <span className="font-semibold text-amber-400">No option actually did the task.</span> Every run declined or only explained what
+                it would need (for example live data or access it does not have). A refusal is not a win, so nothing is recommended. Change the
+                request or provide the data it needs, then run again.
+              </p>
             ) : !winner && ranked.some((s) => s.key !== "skill_baseline_none") ? (
               <p className="text-sm text-command-text">
                 <span className="font-semibold text-amber-400">No skill is eligible for a recommendation.</span> The directory skills that ran did not
@@ -895,9 +908,9 @@ export function SkillEvaluationCenter({ status, ajd, candidates, onEvaluationDon
                     </td>
                     <td className="py-2 pr-2">
                       {laneFor(s.key)?.kind === "directory" ? (
-                        <span className={fitOf(s.key) < 40 ? "text-amber-400" : "text-command-text"} title={fitOf(s.key) < 40 ? "Weak fit — tested, never recommended" : ""}>
+                        <span className={fitOf(s.key) < MIN_FIT ? "text-amber-400" : "text-command-text"} title={fitOf(s.key) < MIN_FIT ? "Weak fit — tested, never recommended" : ""}>
                           {fitOf(s.key)}
-                          {fitOf(s.key) < 40 ? " weak" : ""}
+                          {fitOf(s.key) < MIN_FIT ? " weak" : ""}
                         </span>
                       ) : (
                         <span className="text-command-muted">—</span>
@@ -932,7 +945,7 @@ export function SkillEvaluationCenter({ status, ajd, candidates, onEvaluationDon
                 ))}
               </tbody>
             </table>
-            <p className="mt-2 font-mono text-[10px] text-command-muted">Correctness = 60% recall + 30% precision + 10% grounding, on correctness items only; format is scored separately. Each output judged blind, on its own, by one fixed model. Numbers in brackets = lowest–highest over runs. Recommendation: custom skill or a directory skill with fit ≥ 40; ties go to the custom skill. Click a row for details.</p>
+            <p className="mt-2 font-mono text-[10px] text-command-muted">Correctness = 60% recall + 30% precision + 10% grounding, on correctness items only; format is scored separately. Each output judged blind, on its own, by one fixed model. Numbers in brackets = lowest–highest over runs. Recommendation: custom skill or a directory skill with fit ≥ {MIN_FIT} that actually did the task; a directory skill replaces the custom skill only when clearly better (10+ points). Click a row for details.</p>
           </div>
 
           {(() => {
@@ -1061,7 +1074,9 @@ export function SkillEvaluationCenter({ status, ajd, candidates, onEvaluationDon
               </>
             ) : (
               <p className="mt-2 text-sm text-command-text">
-                No skill is ready to install from this run — every skill option failed. Press “Run again”.
+                {notDone
+                  ? "Nothing to install: no option actually did the task on this test."
+                  : "No skill is ready to install from this run — every skill option failed. Press “Run again”."}
               </p>
             )}
           </div>

@@ -29,6 +29,8 @@ clearly marked it missing instead of guessing.
 invented: list every fact, price or number in the work that does not appear in, or follow from, the request,
 the reference data or the rules. Empty if none.
 asked_for_missing: the information the work correctly said is missing.
+did_task: true if the work actually produced the requested result (even if it marks some items as missing);
+false if it declined, said it cannot do the task, or only explained what would be needed to do it.
 Be strict and consistent. Never reward length or style beyond what the rules ask.`;
 
 const VALID: RuleVerdict[] = ["met", "not_met", "not_applicable"];
@@ -44,7 +46,7 @@ export async function POST(request: Request) {
       `TASK: ${body.task_summary ?? ""}\n\nRULES:\n${rules.map((r) => `${r.id} [${r.kind}] ${r.text}`).join("\n")}\n\n` +
       `REQUEST:\n"""${(body.input || "").slice(0, 5000)}"""\n\nREFERENCE DATA:\n"""${(body.reference_data || "(none)").slice(0, 12000)}"""\n\n` +
       `WORK TO CHECK:\n"""${body.output.slice(0, 12000)}"""\n\n` +
-      'Return {"verdicts":{"R1":"met"},"invented":[""],"asked_for_missing":[""],"note":"one plain sentence"}';
+      'Return {"verdicts":{"R1":"met"},"invented":[""],"asked_for_missing":[""],"did_task":true,"note":"one plain sentence"}';
 
     // One pinned judge model, no fallback chain, so every output in a run is judged the same way.
     const model = process.env.APA_JUDGE_MODEL?.trim() || process.env.APA_SKILLS_MODEL?.trim() || "claude-sonnet-5";
@@ -56,7 +58,7 @@ export async function POST(request: Request) {
       messages: [{ role: "user", content: user }]
     });
     const text = response.content.map((b) => (b.type === "text" ? b.text : "")).join("\n");
-    const parsed = extractJsonObject<{ verdicts: Record<string, string>; invented: string[]; asked_for_missing: string[]; note: string }>(text);
+    const parsed = extractJsonObject<{ verdicts: Record<string, string>; invented: string[]; asked_for_missing: string[]; did_task?: boolean; note: string }>(text);
 
     const verdicts: Record<string, RuleVerdict> = {};
     for (const rule of rules) {
@@ -67,7 +69,8 @@ export async function POST(request: Request) {
       key: "blind",
       verdicts,
       invented: (parsed.invented ?? []).filter((s) => s?.trim()).slice(0, 10),
-      asked_for_missing: (parsed.asked_for_missing ?? []).filter((s) => s?.trim()).slice(0, 10)
+      asked_for_missing: (parsed.asked_for_missing ?? []).filter((s) => s?.trim()).slice(0, 10),
+      did_task: parsed.did_task !== false
     });
     return NextResponse.json({ ...judged, note: parsed.note?.trim() || "", model });
   } catch (error) {

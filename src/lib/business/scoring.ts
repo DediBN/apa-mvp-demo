@@ -20,6 +20,13 @@ export interface JudgedOutput {
   verdicts: Record<string, RuleVerdict>; // rule id -> verdict
   invented: string[]; // facts or numbers stated that are not in the data or the rules
   asked_for_missing: string[]; // information the output correctly said is missing
+  did_task?: boolean; // false when the output declined or only explained why it cannot do the task
+}
+
+// Share of judged outputs that actually did the task (null when the judge did not say).
+export function doneShare(judged: JudgedOutput[]): number | null {
+  const known = judged.filter((j) => typeof j.did_task === "boolean");
+  return known.length ? known.filter((j) => j.did_task).length / known.length : null;
 }
 
 export interface OptionResult {
@@ -30,13 +37,15 @@ export interface OptionResult {
   format: number | null; // % of applicable format rules met
   invented: number;
   cases: number;
+  // share of test cases (0-1) in which the option actually did the task; null/undefined when not measured
+  done?: number | null;
 }
 
 export interface Recommendation {
   key: string | null;
   // what the comparison shows against the baseline, in plain terms
   improvement: "correctness" | "format" | "both" | "none";
-  reason: "best_score" | "tie_custom" | "tie_fit" | "only_eligible" | "no_eligible";
+  reason: "best_score" | "tie_custom" | "tie_fit" | "only_eligible" | "custom_preferred" | "no_eligible" | "not_done";
 }
 
 export const TABLE_WORDS = /טבלה|טבלא|table|tabular|columns?\b|עמודות/i;
@@ -99,24 +108,40 @@ export function scoreOption(rules: Rule[], judged: JudgedOutput[]): { correctnes
   return { correctness: pct(bMet, bApp + invented), format: pct(fMet, fApp), invented };
 }
 
-export const MIN_FIT = 40;
+// Screening fit a library skill needs to be recommended at all: "same task type" or better (see the screening
+// anchors in /api/sourcing/skills). Below it, the skill only shares words or a sub-step with the job.
+export const MIN_FIT = 60;
 const CLEAR_GAIN = 10; // percentage points needed to call it an improvement over the baseline
+// Share of test cases in which an option must have actually done the task (not declined or only explained why
+// it cannot) to count. A run that refuses is not a win, however "correct" the refusal is.
+export const MIN_DONE = 0.5;
+
+export function didTheTask(option: OptionResult): boolean {
+  return option.done === null || option.done === undefined || option.done >= MIN_DONE;
+}
 
 export function isEligible(option: OptionResult): boolean {
   if (option.kind === "baseline") return false;
+  if (!didTheTask(option)) return false;
   return option.kind === "custom" || option.fit >= MIN_FIT;
 }
 
 // Documented rule:
-// 1. Only the custom skill, or a directory skill that passed screening (fit >= MIN_FIT), can be recommended.
-// 2. Rank by correctness, then format. A tie goes to the custom skill (it carries the business's own rules),
-//    then to the better screening fit.
-// 3. The improvement over the baseline is reported separately for correctness and format; less than
+// 1. Fit first. Only the custom skill, or a library skill whose screening fit is "same task type" or better
+//    (fit >= MIN_FIT), can be recommended. A library skill is preferred over the custom skill only when it is
+//    clearly better (CLEAR_GAIN points of correctness); otherwise the custom skill, built for this request, wins.
+// 2. A refusal is not a win. An option that did not actually do the task in most test cases cannot be recommended.
+//    When no option did the task, there is no recommendation (reason "not_done").
+// 3. Rank by correctness, then format. A tie goes to the custom skill, then to the better screening fit.
+// 4. The improvement over the baseline is reported separately for correctness and format; less than
 //    CLEAR_GAIN points is reported as no clear improvement.
 export function recommend(options: OptionResult[]): Recommendation {
   const baseline = options.find((o) => o.kind === "baseline");
   const eligible = options.filter(isEligible);
-  if (eligible.length === 0) return { key: null, improvement: "none", reason: "no_eligible" };
+  if (eligible.length === 0) {
+    const anyDone = options.some((o) => o.kind !== "baseline" && didTheTask(o));
+    return { key: null, improvement: "none", reason: anyDone ? "no_eligible" : "not_done" };
+  }
 
   const val = (n: number | null) => (n === null ? -1 : n);
   const sorted = [...eligible].sort(
@@ -126,9 +151,13 @@ export function recommend(options: OptionResult[]): Recommendation {
       Number(b.kind === "custom") - Number(a.kind === "custom") ||
       b.fit - a.fit
   );
-  const best = sorted[0];
+  let best = sorted[0];
   let reason: Recommendation["reason"] = "best_score";
-  if (eligible.length === 1) reason = "only_eligible";
+  const custom = eligible.find((o) => o.kind === "custom");
+  if (best.kind === "directory" && custom && val(best.correctness) - val(custom.correctness) < CLEAR_GAIN) {
+    best = custom;
+    reason = "custom_preferred";
+  } else if (eligible.length === 1) reason = "only_eligible";
   else {
     const second = sorted[1];
     const tied = val(best.correctness) === val(second.correctness) && val(best.format) === val(second.format);

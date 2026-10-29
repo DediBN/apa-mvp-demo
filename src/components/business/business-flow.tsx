@@ -6,7 +6,7 @@
 import { useRef, useState } from "react";
 import { readUploadAsText, UPLOAD_ACCEPT } from "../../lib/files/read-upload";
 import { buildZip, skillFolderName } from "../../lib/skills/zip";
-import { recommend, scoreOption, type JudgedOutput, type OptionResult, type Recommendation, type Rule } from "../../lib/business/scoring";
+import { doneShare, MIN_FIT, recommend, scoreOption, type JudgedOutput, type OptionResult, type Recommendation, type Rule } from "../../lib/business/scoring";
 import { Markdown } from "./markdown";
 import { useLang } from "./i18n";
 
@@ -23,6 +23,7 @@ interface Interview {
   task_summary: string;
   known_rules: Array<{ id: string; text: string; kind: "business" | "format"; source: "user" | "document" }>;
   questions: Question[];
+  feasibility?: { status: "ok" | "needs_file" | "not_possible"; reason: string; needs: string };
 }
 interface Answer {
   answer: string;
@@ -83,6 +84,7 @@ export function BusinessFlow() {
   const [missing, setMissing] = useState<string[]>([]);
   const [outputFormat, setOutputFormat] = useState("");
   const [approved, setApproved] = useState(false);
+  const [overrideGate, setOverrideGate] = useState(false);
   const sourcing = useRef<Promise<DirectoryCandidate | null> | null>(null);
 
   // step 3
@@ -138,8 +140,10 @@ export function BusinessFlow() {
       setAnswers(Object.fromEntries(data.questions.map((q) => [q.id, { answer: "", fromDefault: false, skipped: false }])));
       setRules(null);
       setApproved(false);
+      setOverrideGate(false);
       setStep(2);
-      startSourcing(data.task_title, data.task_summary);
+      // Sourcing starts only when the task can be done; a stopped request costs nothing more.
+      if ((data.feasibility?.status ?? "ok") === "ok") startSourcing(data.task_title, data.task_summary);
     } catch (e) {
       setError(e instanceof Error ? e.message : t.errorGeneric);
     } finally {
@@ -246,7 +250,16 @@ export function BusinessFlow() {
         const judged = o.judged.filter((j): j is JudgedOutput => Boolean(j));
         if (judged.length === 0) continue;
         const s = scoreOption(finalRules, judged);
-        results[o.key] = { key: o.key, kind: o.kind, fit: o.fit, correctness: s.correctness, format: s.format, invented: s.invented, cases: judged.length };
+        results[o.key] = {
+          key: o.key,
+          kind: o.kind,
+          fit: o.fit,
+          correctness: s.correctness,
+          format: s.format,
+          invented: s.invented,
+          cases: judged.length,
+          done: doneShare(judged)
+        };
       }
       setOptions(opts);
       setScores(results);
@@ -309,6 +322,8 @@ export function BusinessFlow() {
   const pctText = (n: number | null | undefined) => (n === null || n === undefined ? "—" : `${n}%`);
 
   const verdictText = rec ? { both: t.s3VerdictBoth, correctness: t.s3VerdictCorrect, format: t.s3VerdictFormat, none: t.s3VerdictNone }[rec.improvement] : "";
+  const gate = interview?.feasibility?.status ?? "ok";
+  const notDone = rec?.reason === "not_done";
   const allAnswered = interview ? interview.questions.every((q) => answers[q.id]?.skipped || answers[q.id]?.answer.trim()) : false;
 
   return (
@@ -394,6 +409,36 @@ export function BusinessFlow() {
           </h2>
           <p className="mt-1 text-command-muted">{interview.task_summary}</p>
 
+          {gate !== "ok" && !overrideGate ? (
+            <div className={`mt-6 rounded-xl border p-5 ${gate === "not_possible" ? "border-command-fail/50 bg-command-fail/10" : "border-command-warning/50 bg-command-warning/5"}`}>
+              <p className="text-lg font-semibold">{gate === "not_possible" ? t.fxNotTitle : t.fxFileTitle}</p>
+              {interview.feasibility?.reason ? <p className="mt-2">{interview.feasibility.reason}</p> : null}
+              {interview.feasibility?.needs ? (
+                <p className="mt-1 text-command-muted">
+                  <b>{t.fxNeeds}</b> {interview.feasibility.needs}
+                </p>
+              ) : null}
+              <p className="mt-2 text-sm text-command-muted">{gate === "not_possible" ? t.fxNotHint : t.fxFileHint}</p>
+              <div className="mt-4 flex flex-wrap items-center gap-4">
+                <button type="button" className={primary} onClick={() => setStep(1)}>
+                  {gate === "not_possible" ? t.fxChange : t.fxAttach}
+                </button>
+                <button
+                  type="button"
+                  className="text-sm text-command-muted underline"
+                  onClick={() => {
+                    setOverrideGate(true);
+                    if (!sourcing.current) startSourcing(interview.task_title, interview.task_summary);
+                  }}
+                >
+                  {gate === "not_possible" ? t.fxAnyway : t.fxSample}
+                </button>
+              </div>
+            </div>
+          ) : null}
+
+          {gate !== "ok" && !overrideGate ? null : (
+          <>
           <h3 className="mt-6 font-semibold">{t.s2Known}</h3>
           {interview.known_rules.length === 0 ? (
             <p className="mt-1 text-sm text-command-muted">{t.s2KnownEmpty}</p>
@@ -543,6 +588,8 @@ export function BusinessFlow() {
               </div>
             </>
           )}
+          </>
+          )}
         </section>
       ) : null}
 
@@ -597,8 +644,15 @@ export function BusinessFlow() {
                 </div>
               ) : null}
 
+              {notDone ? (
+                <div className="mt-6 rounded-xl border border-command-fail/50 bg-command-fail/10 p-4">
+                  <p className="font-semibold">{t.s3NotDoneTitle}</p>
+                  <p className="mt-1 text-sm">{t.s3NotDone}</p>
+                </div>
+              ) : null}
+
               <h3 className="mt-8 text-lg font-semibold">{t.s3Scores}</h3>
-              <p className="mt-1">{verdictText}</p>
+              <p className="mt-1">{notDone ? t.s3NotDoneVerdict : verdictText}</p>
               <p className="mt-1 text-xs text-command-muted">{t.s3BaselineNote}</p>
               {recommended && baseline ? (
                 <div className="mt-3 overflow-x-auto">
@@ -646,7 +700,7 @@ export function BusinessFlow() {
                   {options.map((o) => (
                     <li key={o.key}>
                       <b>{o.name}</b>
-                      {o.kind === "directory" ? ` · ${t.s3Fit} ${o.fit}${o.fit < 40 ? ` · ${t.s3Weak}` : ""}` : ""} · {t.s3Correct} {pctText(scores[o.key]?.correctness)} · {t.s3Format}{" "}
+                      {o.kind === "directory" ? ` · ${t.s3Fit} ${o.fit}${o.fit < MIN_FIT ? ` · ${t.s3Weak}` : ""}` : ""} · {t.s3Correct} {pctText(scores[o.key]?.correctness)} · {t.s3Format}{" "}
                       {pctText(scores[o.key]?.format)}
                       {o.key === recommended?.key ? " ✓" : ""}
                     </li>
@@ -692,12 +746,20 @@ export function BusinessFlow() {
               </details>
 
               <div className="mt-6 flex flex-wrap items-center gap-4">
-                <button type="button" className={primary} onClick={() => setStep(4)}>
-                  {t.s3Primary}
-                </button>
-                <p className="text-sm text-command-muted">
-                  <b>{t.nextLabel}</b> {t.s3Next}
-                </p>
+                {notDone ? (
+                  <button type="button" className={primary} onClick={restart}>
+                    {t.s4Restart}
+                  </button>
+                ) : (
+                  <>
+                    <button type="button" className={primary} onClick={() => setStep(4)}>
+                      {t.s3Primary}
+                    </button>
+                    <p className="text-sm text-command-muted">
+                      <b>{t.nextLabel}</b> {t.s3Next}
+                    </p>
+                  </>
+                )}
               </div>
             </div>
           ) : null}

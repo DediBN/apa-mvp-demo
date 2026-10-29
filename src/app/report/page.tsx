@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { decodeReport, type SharedReport } from "../../lib/skills/share";
+import { MIN_FIT } from "../../lib/business/scoring";
 
 const tone = (n: number) => (n >= 80 ? "text-emerald-400" : n >= 50 ? "text-amber-400" : "text-red-400");
 
@@ -93,7 +94,7 @@ export default function ReportPage() {
                   {r.recommended ? <span className="ml-2 text-command-action">★</span> : null}
                   {r.warning ? <span className="ml-2 rounded border border-red-400/50 bg-red-400/10 px-1.5 text-[10px] text-red-300" title={r.warning}>⚠ review</span> : null}
                 </td>
-                <td className="py-2 pr-2">{r.fit === null ? "—" : <span className={r.fit < 40 ? "text-amber-400" : ""}>{r.fit}{r.fit < 40 ? " weak" : ""}</span>}</td>
+                <td className="py-2 pr-2">{r.fit === null ? "—" : <span className={r.fit < MIN_FIT ? "text-amber-400" : ""}>{r.fit}{r.fit < MIN_FIT ? " weak" : ""}</span>}</td>
                 <td className={`py-2 pr-2 text-sm font-semibold ${tone(r.correctness)}`}>
                   {r.correctness}
                   <span className="ml-1 text-[10px] font-normal text-command-muted">{range(r)}</span>

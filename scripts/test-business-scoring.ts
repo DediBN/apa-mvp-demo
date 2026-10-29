@@ -74,7 +74,7 @@ test("the Azure case: weak-fit skill tied at the top is not recommended; tie goe
   const r = recommend([
     opt("pricing-estimate (Azure)", "directory", 25, 100, 100),
     opt("custom", "custom", 100, 100, 100),
-    opt("quote-helper", "directory", 55, 100, 100),
+    opt("quote-helper", "directory", 65, 100, 100),
     opt("baseline", "baseline", 0, 100, 0)
   ]);
   assert.equal(r.key, "custom");
@@ -105,6 +105,41 @@ test("no eligible option yields no recommendation", () => {
   const r = recommend([opt("azure", "directory", 20, 100, 100), opt("baseline", "baseline", 0, 90, 90)]);
   assert.equal(r.key, null);
   assert.equal(r.reason, "no_eligible");
+});
+
+test("the cinema case: a grocery-price skill (fit 58) scoring higher is not recommended", () => {
+  const r = recommend([
+    opt("israeli-grocery-price-intelligence", "directory", 58, 100, 100),
+    opt("custom", "custom", 100, 68, 100),
+    opt("baseline", "baseline", 0, 88, 100)
+  ]);
+  assert.equal(r.key, "custom");
+});
+
+test("a refusal is not a win: options that did not do the task are not recommended", () => {
+  const done = (o: OptionResult, d: number) => ({ ...o, done: d });
+  const r = recommend([
+    done(opt("price-skill", "directory", 80, 100, 100), 0),
+    done(opt("custom", "custom", 100, 70, 100), 0),
+    done(opt("baseline", "baseline", 0, 88, 100), 0)
+  ]);
+  assert.equal(r.key, null);
+  assert.equal(r.reason, "not_done");
+});
+
+test("an option that did the task wins over higher-scoring ones that refused", () => {
+  const r = recommend([
+    { ...opt("price-skill", "directory", 80, 100, 100), done: 0 },
+    { ...opt("custom", "custom", 100, 70, 100), done: 1 },
+    opt("baseline", "baseline", 0, 60, 100)
+  ]);
+  assert.equal(r.key, "custom");
+});
+
+test("a library skill only slightly better than the custom skill does not replace it", () => {
+  const r = recommend([opt("quote-helper", "directory", 75, 95, 100), opt("custom", "custom", 100, 90, 100), opt("baseline", "baseline", 0, 60, 0)]);
+  assert.equal(r.key, "custom");
+  assert.equal(r.reason, "custom_preferred");
 });
 
 console.log(`\n${passed} tests passed`);

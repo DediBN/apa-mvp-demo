@@ -29,6 +29,8 @@ const SYSTEM = `You are an independent auditor checking one AI run on a business
   ("סכום סופי לתשלום" meets "סה״כ לתשלום"); what matters is that the element is there, clearly.
 - false_flags: items where the run flagged a problem that is not real, or asserted something wrong about the data.
 - unsupported: number of result items stating facts or numbers that do not appear in or follow from the data.
+- did_task: true if the run actually produced the requested result from the data; false if it declined, said it
+  cannot do the task, or only explained what would be needed (e.g. live data or access it does not have).
 - verdict: one plain sentence.
 Judge only this run. Be strict and consistent. Never reward length.`;
 
@@ -47,11 +49,11 @@ export async function POST(request: Request) {
         .map((it, i) => `${i + 1}. [${it.reliability}] ${it.label} — ${it.detail}${it.reason ? ` (${it.reason})` : ""}`)
         .join("\n") +
       (body.output?.deliverable?.trim() ? `\n\nDELIVERABLE (exactly as handed over)\n"""${body.output.deliverable.slice(0, MAX)}"""` : "\n\nDELIVERABLE: none produced");
-    const result = await pinnedJson<{ found: string[]; false_flags: Array<{ item: string; why: string }>; unsupported: number; verdict: string }>(
+    const result = await pinnedJson<{ found: string[]; false_flags: Array<{ item: string; why: string }>; unsupported: number; did_task?: boolean; verdict: string }>(
       SYSTEM,
       `TASK\n${body.action_description ?? ""}\n\nDATA\n"""${body.customer_data.slice(0, MAX)}"""\n\nREFERENCE\n"""${(body.reference_data || "(none)").slice(0, MAX)}"""\n\n` +
         `GROUND TRUTH\n${issues.map((i) => `${i.id} [${i.kind}] ${i.description}`).join("\n")}\n\nRUN\n${run}\n\n` +
-        "Submit found, false_flags, unsupported and verdict.",
+        "Submit found, false_flags, unsupported, did_task and verdict.",
       2000,
       {
         type: "object",
@@ -62,9 +64,10 @@ export async function POST(request: Request) {
             items: { type: "object", properties: { item: { type: "string" }, why: { type: "string" } }, required: ["item", "why"] }
           },
           unsupported: { type: "integer", minimum: 0 },
+          did_task: { type: "boolean", description: "false if the run declined or only explained why it cannot do the task" },
           verdict: { type: "string" }
         },
-        required: ["found", "false_flags", "unsupported", "verdict"]
+        required: ["found", "false_flags", "unsupported", "did_task", "verdict"]
       }
     );
     const ids = new Set(issues.map((i) => i.id));
@@ -89,6 +92,7 @@ export async function POST(request: Request) {
       false_flags: (result.false_flags ?? []).filter((f) => f?.item?.trim()),
       unsupported: Math.min(items.length, Math.max(0, Number(result.unsupported) || 0)),
       total_items: items.length,
+      did_task: result.did_task !== false,
       // Strip any markup the model leaked into the text (e.g. a stray closing tag).
       verdict: (result.verdict ?? "").replace(/<\/?[a-z_]+[^>]*>/gi, "").trim(),
       model: JUDGE_MODEL

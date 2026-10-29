@@ -7,6 +7,7 @@ import { Candidate } from "../../lib/research-agent/mock";
 import { runSkillSourcingScan } from "../../lib/research-agent/client";
 import { securityWarning } from "../../lib/skills/security";
 import { StatusPill } from "../ui/status-pill";
+import { MIN_FIT } from "../../lib/business/scoring";
 
 interface SourcingRadarProps {
   status: APAStatus;
@@ -284,7 +285,7 @@ export function SourcingRadar({ status, ajd, onShortlistReady, onFail, addLog }:
                   <p className="mt-2 font-mono text-xs text-command-muted">
                     {candidate.source === "Custom Skill"
                       ? "Tested in Step 03"
-                      : `Screening fit ${candidate.fit_score_pre_eval}${candidate.fit_score_pre_eval < 40 ? " · weak fit — tested for comparison, never recommended" : " · tested in Step 03"}`}
+                      : `Screening fit ${candidate.fit_score_pre_eval}${candidate.fit_score_pre_eval < MIN_FIT ? " · weak fit — tested for comparison, never recommended" : " · tested in Step 03"}`}
                   </p>
                   {securityWarning(candidate.risk_flags) ? (
                     <p className="mt-2 inline-flex items-center gap-1 rounded border border-red-400/50 bg-red-400/10 px-2 py-0.5 text-[11px] font-semibold text-red-300">

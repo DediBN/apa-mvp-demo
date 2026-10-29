@@ -19,6 +19,8 @@ export interface OptionScore {
   correctness_max?: number;
   format?: number | null;
   runs?: number;
+  // share of runs (0-1) that actually did the task rather than declining; null when not measured
+  done?: number | null;
 }
 
 export interface JudgeResponse {

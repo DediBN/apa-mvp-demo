@@ -4,6 +4,7 @@
 import { NextResponse } from "next/server";
 import type { Candidate } from "../../../../lib/research-agent/mock";
 import { claudeJson } from "../../../../lib/skills/claude-json";
+import { MIN_FIT } from "../../../../lib/business/scoring";
 import {
   SkillHit,
   dedupeHits,
@@ -41,7 +42,6 @@ interface ScreeningResult {
 const MAX_TO_FETCH = 24;
 const MAX_SHORTLIST = 4; // directory skills tested; + custom skill + no-skill baseline
 const MIN_SKILLS = 3; // always test at least this many directory skills when that many are readable
-const MIN_FIT = 40;
 const SKILL_EXCERPT_CHARS = 2500;
 const SKILL_CARRY_CHARS = 20000;
 
