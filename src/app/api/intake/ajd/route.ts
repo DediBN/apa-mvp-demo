@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { createAnthropicClient } from "../../../../lib/anthropic-client";
+import { pinnedJson } from "../../../../lib/skills/pinned-json";
 import { AJD } from "../../../../lib/intake-agent/mock";
 
 interface ClaudeAJD {
@@ -11,23 +11,6 @@ interface ClaudeAJD {
     target: string;
   }>;
   tech_specs: string[];
-}
-
-function extractJson(text: string): ClaudeAJD {
-  const direct = text.trim();
-
-  try {
-    return JSON.parse(direct) as ClaudeAJD;
-  } catch {
-    const start = direct.indexOf("{");
-    const end = direct.lastIndexOf("}");
-
-    if (start >= 0 && end > start) {
-      return JSON.parse(direct.slice(start, end + 1)) as ClaudeAJD;
-    }
-
-    throw new Error("Claude did not return valid JSON.");
-  }
 }
 
 function normalizeClaudeAJD(raw: ClaudeAJD, businessNeed: string): AJD {
@@ -76,6 +59,49 @@ function normalizeClaudeAJD(raw: ClaudeAJD, businessNeed: string): AJD {
   };
 }
 
+const SYSTEM = `You define Claude Agent Skills for business processes.
+- role: a short name for the skill (e.g. "Supplier Invoice Checker"). Never use the word Agent.
+- mission: what the skill makes Claude do, in one or two sentences.
+- domain: the business area.
+- kpis: exactly 3 measurable success measures with a concrete target each, that can be checked on a test output
+  (e.g. "Below-minimum products found: 100%"). Never response-time or uptime targets.
+- tech_specs: 5 concrete capabilities the skill needs (what it reads, checks, calculates and produces).
+- feasibility: can an AI assistant with a written skill do this task using ONLY data the business gives it (files or
+  text it pastes) and general knowledge? A skill is written instructions: it cannot browse the web, fetch live data,
+  or read or send anything in other systems.
+  status "not_possible": the task needs live or current outside information the business does not have in its own
+  files (today's prices or schedules of other businesses, availability, news, web search), or needs to act in another
+  system (send emails or messages, update a calendar, a website or a bank).
+  status "needs_file": the task is about the business's own records (stock, clients, appointments, invoices, price
+  list...) and the request does not include them — the run must use the business's file.
+  status "ok": otherwise. reason: one sentence on what is missing ("" when ok). needs: one sentence on what would make
+  it work ("" when ok).
+Write role, mission, KPIs and tech_specs in the language of the requirement. reason and needs in English.`;
+
+const SCHEMA = {
+  type: "object",
+  properties: {
+    role: { type: "string" },
+    mission: { type: "string" },
+    domain: { type: "string" },
+    kpis: {
+      type: "array",
+      items: { type: "object", properties: { name: { type: "string" }, target: { type: "string" } }, required: ["name", "target"] }
+    },
+    tech_specs: { type: "array", items: { type: "string" } },
+    feasibility: {
+      type: "object",
+      properties: {
+        status: { type: "string", enum: ["ok", "needs_file", "not_possible"] },
+        reason: { type: "string" },
+        needs: { type: "string" }
+      },
+      required: ["status", "reason", "needs"]
+    }
+  },
+  required: ["role", "mission", "domain", "kpis", "tech_specs", "feasibility"]
+};
+
 export async function POST(request: Request) {
   try {
     const body = (await request.json()) as { businessNeed?: string };
@@ -85,64 +111,25 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: "businessNeed is required" }, { status: 400 });
     }
 
-    const anthropic = createAnthropicClient();
-    const requestPayload = {
-      max_tokens: 900,
-      temperature: 0.2,
-      system:
-        "You define Claude Agent Skills for business processes. \"role\" is a short name for the skill (e.g. \"Supplier Invoice Checker\") — never use the word Agent. \"mission\" says what the skill makes Claude do. \"tech_specs\" are the concrete capabilities the skill needs. Return strict JSON only. No markdown, no prose.",
-      messages: [
-        {
-          role: "user" as const,
-          content:
-            "Analyze this business requirement and return JSON with this exact shape: " +
-            '{"role":"string","mission":"string","domain":"string","kpis":[{"name":"string","target":"string"},{"name":"string","target":"string"},{"name":"string","target":"string"}],"tech_specs":["string","string","string","string","string"]}. ' +
-            `Business requirement: ${businessNeed}`
-        }
-      ]
-    };
-
-    const modelFallbackChain = [
-      "claude-sonnet-5-5",
-      "claude-3-5-sonnet-latest",
-      "claude-3-opus-latest",
-      "claude-sonnet-4-6",
-      "claude-opus-4-6",
-      "claude-sonnet-4-20250514"
-    ];
-
-    let response;
-    let lastError: unknown;
-
-    for (const model of modelFallbackChain) {
-      try {
-        response = await anthropic.messages.create({
-          model,
-          ...requestPayload
-        });
-        console.log("Model selected:", model);
-        break;
-      } catch (error) {
-        lastError = error;
-        console.error(`Anthropic model failed (${model}):`, error);
-      }
-    }
-
-    if (!response) {
-      throw lastError instanceof Error ? lastError : new Error("All Anthropic models failed.");
-    }
-
-    const textParts = response.content
-      .filter((block) => block.type === "text")
-      .map((block) => block.text)
-      .join("\n");
-
-    const parsed = extractJson(textParts);
+    // Structured answer (forced tool call): Hebrew quotes such as ש"ח in a KPI target cannot break parsing.
+    const parsed = await pinnedJson<ClaudeAJD & { feasibility?: AJD["feasibility"] }>(
+      SYSTEM,
+      `Business requirement:\n"""${businessNeed.slice(0, 6000)}"""\n\nSubmit the skill spec.`,
+      3000,
+      SCHEMA,
+      { model: process.env.APA_SKILLS_MODEL?.trim() || "claude-sonnet-5-5" }
+    );
     const ajd = normalizeClaudeAJD(parsed, businessNeed);
+    const f = parsed.feasibility;
+    ajd.feasibility = {
+      status: f && ["ok", "needs_file", "not_possible"].includes(f.status) ? f.status : "ok",
+      reason: f?.reason?.trim() || "",
+      needs: f?.needs?.trim() || ""
+    };
 
     return NextResponse.json({ ajd });
   } catch (error) {
-    const message = error instanceof Error ? error.message : "Failed to generate AJD";
-    return NextResponse.json({ error: message }, { status: 500 });
+    console.error("[intake/ajd]", error instanceof Error ? error.message : error);
+    return NextResponse.json({ error: "Could not write the Skill Spec. Please try again." }, { status: 500 });
   }
 }

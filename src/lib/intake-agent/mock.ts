@@ -1,4 +1,6 @@
 export interface AJD {
+  // Can a skill do this with what the business gives it? Set by /api/intake/ajd.
+  feasibility?: { status: "ok" | "needs_file" | "not_possible"; reason: string; needs: string };
   job_title: string;
   business_need: string;
   domain: string;

@@ -18,8 +18,9 @@ interface SourcingRadarProps {
 }
 
 // Skill sourcing = query planning + 2 directories + SKILL.md retrieval + screening, so allow time for it.
-const SOURCING_TIMEOUT_MS = 55000;
-const API_REPLACE_WINDOW_MS = 55000;
+// The scan searches two directories, fetches up to 24 SKILL.md files and screens them: it can take 1-2 minutes.
+const SOURCING_TIMEOUT_MS = 150000;
+const API_REPLACE_WINDOW_MS = 150000;
 
 function buildLocalFallbackCandidates(ajd: AJD): Candidate[] {
   return [
@@ -122,7 +123,6 @@ export function SourcingRadar({ status, ajd, onShortlistReady, onFail, addLog }:
 
     Promise.race<Candidate[]>([
       (() => {
-        console.log("CALLING API NOW", Date.now());
         return runSkillSourcingScan({
           jobTitle,
           mission,
@@ -149,13 +149,10 @@ export function SourcingRadar({ status, ajd, onShortlistReady, onFail, addLog }:
           return;
         }
 
-        const resultPayload = { candidates: result };
-        console.log("API RESULT:", resultPayload?.candidates?.length, resultPayload?.candidates?.[0]?.name, Date.now());
-        console.log("API response time:", Date.now() - startTime, "ms");
-        console.log("API returned:", result?.length, result?.[0]?.name);
+        addLog(`Directory scan finished in ${Math.round((Date.now() - startTime) / 1000)}s.`);
 
         if (!Array.isArray(result) || result.length < 2) {
-          addLog("Skill sourcing returned fewer than 2 options. Using local fallback shortlist.");
+          addLog("⚠ The directory scan found fewer than 2 options. Continuing with the custom skill and Claude with no skill.");
           return;
         }
 
@@ -172,7 +169,7 @@ export function SourcingRadar({ status, ajd, onShortlistReady, onFail, addLog }:
         }
 
         const reason = error instanceof Error ? error.message : "Sourcing scan failed";
-        addLog(`Sourcing API error/timeout: ${reason}. Keeping local fallback shortlist.`);
+        addLog(`⚠ Directory scan failed (${reason}). Continuing with the custom skill and Claude with no skill only.`);
       })
       .finally(() => {
         if (!isStale()) {

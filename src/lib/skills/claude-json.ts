@@ -28,6 +28,8 @@ export async function claudeJson<T>(system: string, user: string, maxTokens = 15
   const anthropic = createAnthropicClient();
   let lastError: unknown;
   for (const model of opts.fast ? FAST_MODEL_CHAIN : MODEL_CHAIN) {
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+    if (attempt > 0) await new Promise((r) => setTimeout(r, 1500 * 2 ** (attempt - 1) + Math.random() * 500));
     try {
       const response = await anthropic.messages.create({
         model,
@@ -39,9 +41,15 @@ export async function claudeJson<T>(system: string, user: string, maxTokens = 15
         .filter((block) => block.type === "text")
         .map((block) => (block.type === "text" ? block.text : ""))
         .join("\n");
+      if (response.stop_reason === "max_tokens") throw new Error(`Answer cut off at ${maxTokens} tokens`);
       return extractJsonObject<T>(text);
     } catch (error) {
       lastError = error;
+      const status = (error as { status?: number })?.status;
+      // Rate limit or overload: wait and retry the same model. Anything else: move on to the next model.
+      if (status === 429 || status === 529 || status === 503) continue;
+      break;
+    }
     }
   }
   throw lastError instanceof Error ? lastError : new Error("All models failed.");

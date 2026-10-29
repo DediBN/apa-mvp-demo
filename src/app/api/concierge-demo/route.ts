@@ -144,15 +144,32 @@ export async function POST(req: NextRequest) {
 
     const anthropic = createAnthropicClient();
 
-    const response = await anthropic.messages.create({
-      model: process.env.APA_SKILLS_MODEL?.trim() || "claude-sonnet-5",
-      max_tokens: 12000,
-      system: skill_md?.trim() ? SYSTEM_PROMPT + skillBlock(skill_md, skill_name) : SYSTEM_PROMPT,
-      // Structured output: the model never hand-writes JSON, so quotes inside Hebrew text (ש"ח) can't break parsing.
-      tools: [{ name: "submit", description: "Submit the result of the action.", input_schema: RESULT_SCHEMA as never }],
-      tool_choice: { type: "tool", name: "submit" },
-      messages: [{ role: "user", content: userContent }],
-    });
+    // One pinned model for every option (and the no-skill baseline), so differences come from the skill only.
+    // The fast model keeps the many test runs cheap; set APA_RUN_MODEL to run them on another model.
+    const model = process.env.APA_RUN_MODEL?.trim() || process.env.APA_MODEL_FAST?.trim() || "claude-haiku-5-5";
+    // Rate limits and overload are retried on the same model, with backoff, before the run counts as failed.
+    let response: Awaited<ReturnType<typeof anthropic.messages.create>> | null = null;
+    let lastError: unknown;
+    for (let attempt = 0; attempt < 3 && !response; attempt += 1) {
+      if (attempt > 0) await new Promise((r) => setTimeout(r, 2000 * 2 ** (attempt - 1) + Math.random() * 800));
+      try {
+        response = await anthropic.messages.create({
+          model,
+          max_tokens: 12000,
+          system: skill_md?.trim() ? SYSTEM_PROMPT + skillBlock(skill_md, skill_name) : SYSTEM_PROMPT,
+          // Structured output: the model never hand-writes JSON, so quotes inside Hebrew text (ש"ח) can't break parsing.
+          tools: [{ name: "submit", description: "Submit the result of the action.", input_schema: RESULT_SCHEMA as never }],
+          tool_choice: { type: "tool", name: "submit" },
+          messages: [{ role: "user", content: userContent }],
+        });
+      } catch (error) {
+        lastError = error;
+        const status = (error as { status?: number })?.status;
+        console.warn("[concierge-demo] attempt", attempt + 1, status ?? "", error instanceof Error ? error.message : error);
+        if (status && status >= 400 && status < 500 && status !== 408 && status !== 409 && status !== 429) break;
+      }
+    }
+    if (!response || !("content" in response)) throw lastError instanceof Error ? lastError : new Error("Test run failed");
 
     const toolBlock = response.content.find((block) => block.type === "tool_use");
     const toolInput = toolBlock && toolBlock.type === "tool_use" ? (toolBlock.input as { items?: unknown; summary?: string; deliverable?: string }) : null;
@@ -212,7 +229,7 @@ export async function POST(req: NextRequest) {
     const message = err instanceof Error ? err.message : String(err);
     console.error("[concierge-demo] request failed:", message);
     return NextResponse.json(
-      { error: "Could not complete the readiness check. Please try again." },
+      { error: "Test run failed. Please run again." },
       { status: 500 }
     );
   }

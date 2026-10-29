@@ -45,7 +45,7 @@ export async function POST(request: Request) {
       `TASK\n${body.action_description ?? ""}\n\nDATA\n"""${body.customer_data.slice(0, MAX)}"""\n\nREFERENCE\n"""${(body.reference_data || "(none)").slice(0, MAX)}"""\n\n` +
         (body.answer_key?.trim() ? `ANSWER KEY\n"""${body.answer_key.slice(0, 6000)}"""\n\n` : "") +
         "Submit the ground-truth items.",
-      4000,
+      8000,
       {
         type: "object",
         properties: {

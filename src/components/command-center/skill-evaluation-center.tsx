@@ -1,9 +1,10 @@
 "use client";
 
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { APAStatus } from "../../lib/state-machine";
 import { AJD } from "../../lib/intake-agent/mock";
 import { readUploadAsText, UPLOAD_ACCEPT } from "../../lib/files/read-upload";
+import { pickSheets, readSheets, SHEET_EXTENSIONS, sheetsText, type Sheet } from "../../lib/files/sheets";
 import { Candidate } from "../../lib/research-agent/mock";
 import { CandidateEvaluationResult } from "../../lib/evaluation-agent/mock";
 import type { GeneratedScenario, JudgeResponse, OptionScore } from "../../lib/skills/types";
@@ -25,6 +26,22 @@ interface SkillEvaluationCenterProps {
   candidates: Candidate[];
   onEvaluationDone: (results: CandidateEvaluationResult[]) => void;
   addLog: (line: string) => void;
+  initialFile?: File | null; // handed over from the landing page: used as the real data
+  preferData?: boolean; // the task runs on the business's own file: open on "Test on my real data"
+}
+
+// Picks the sheets a task is about: a sheet whose name shares a word with the Skill Spec, plus small lookup sheets.
+// The user can change the choice; when nothing matches, all sheets are used.
+function guessSheets(sheets: Sheet[], ajd: AJD | null): string[] {
+  const spec = [ajd?.business_need, ajd?.job_title, ajd?.agent_profile?.mission, ...(ajd?.agent_profile?.kpis ?? []).map((k) => k.name), ...(ajd?.agent_profile?.tech_specs ?? [])]
+    .join(" ")
+    .toLowerCase();
+  // A sheet word matches when the spec contains it, or its stem without a Hebrew plural ending (ספקים → ספק).
+  const matches = (w: string) => w.length >= 3 && (spec.includes(w) || spec.includes(w.replace(/(ים|ות)$/, "")));
+  const hits = sheets.filter((sh) => sh.name.toLowerCase().split(/[^\p{L}\p{N}]+/u).some(matches));
+  if (hits.length === 0) return sheets.map((sh) => sh.name);
+  const small = sheets.filter((sh) => sh.csv.length <= 1500 && !hits.includes(sh));
+  return [...hits, ...small].map((sh) => sh.name);
 }
 
 type ReliabilityTag = "found_in_data" | "inferred" | "needs_approval" | "missing_info" | "cannot_demonstrate";
@@ -124,7 +141,7 @@ function toEvaluationResult(lane: Lane, score: OptionScore | undefined): Candida
   };
 }
 
-export function SkillEvaluationCenter({ status, ajd, candidates, onEvaluationDone, addLog }: SkillEvaluationCenterProps) {
+export function SkillEvaluationCenter({ status, ajd, candidates, onEvaluationDone, addLog, initialFile, preferData }: SkillEvaluationCenterProps) {
   const [customerData, setCustomerData] = useState("");
   const [referenceData, setReferenceData] = useState("");
   const [answerKey, setAnswerKey] = useState("");
@@ -157,6 +174,8 @@ export function SkillEvaluationCenter({ status, ajd, candidates, onEvaluationDon
   );
 
   const [fileStatus, setFileStatus] = useState<string | null>(null);
+  const [sheets, setSheets] = useState<Sheet[] | null>(null);
+  const [usedSheets, setUsedSheets] = useState<string[]>([]);
 
   const readFile = useCallback(async (file: File, setter: (v: string) => void) => {
     setError(null);
@@ -170,6 +189,49 @@ export function SkillEvaluationCenter({ status, ajd, candidates, onEvaluationDon
       setError(e instanceof Error ? e.message : "Could not read that file — paste the content instead.");
     }
   }, []);
+
+  // A spreadsheet is read in the browser; only the sheets the task is about are sent, each in full up to the limit.
+  const readCustomerFile = useCallback(
+    async (file: File) => {
+      const ext = file.name.split(".").pop()?.toLowerCase() ?? "";
+      if (!SHEET_EXTENSIONS.includes(ext)) {
+        setSheets(null);
+        return readFile(file, setCustomerData);
+      }
+      setError(null);
+      setFileStatus(`Reading ${file.name}…`);
+      try {
+        const all = await readSheets(file);
+        const chosen = guessSheets(all, ajd);
+        setSheets(all);
+        setUsedSheets(chosen);
+        setFileStatus(`${file.name}: ${all.length} sheet${all.length === 1 ? "" : "s"} read in the browser — using ${chosen.join(", ")}.`);
+      } catch (e) {
+        setFileStatus(null);
+        setError(e instanceof Error ? e.message : "Could not read that file.");
+      }
+    },
+    [ajd, readFile]
+  );
+
+  useEffect(() => {
+    if (!sheets) return;
+    const { text, cut } = sheetsText(pickSheets(sheets, usedSheets), MAX_CHARS);
+    setCustomerData(text);
+    if (cut) setFileStatus(`The chosen sheets are longer than ${MAX_CHARS.toLocaleString()} characters — only the first part is used. Remove a sheet the task does not need.`);
+  }, [sheets, usedSheets]);
+
+  useEffect(() => {
+    if (preferData) setMode("data");
+  }, [preferData]);
+
+  const [initialRead, setInitialRead] = useState(false);
+  useEffect(() => {
+    if (!initialFile || initialRead || !ajd) return;
+    setInitialRead(true);
+    setMode("data");
+    void readCustomerFile(initialFile);
+  }, [initialFile, initialRead, ajd, readCustomerFile]);
 
   const updateLane = (id: string, patch: Partial<Lane>) =>
     setLanes((prev) => prev.map((lane) => (lane.candidate.candidate_id === id ? { ...lane, ...patch } : lane)));
@@ -225,6 +287,8 @@ export function SkillEvaluationCenter({ status, ajd, candidates, onEvaluationDon
         const generated = {
           scenarios: settled.flatMap((r) => (r.status === "fulfilled" ? r.value.scenarios : []))
         };
+        const dropped = settled.filter((r) => r.status === "rejected").length;
+        if (dropped > 0 && generated.scenarios.length > 0) addLog(`One test set could not be generated — continuing with ${generated.scenarios.length}.`);
         if (generated.scenarios.length === 0) {
           throw new Error("Could not generate test scenarios. Please try again.");
         }
@@ -267,14 +331,21 @@ export function SkillEvaluationCenter({ status, ajd, candidates, onEvaluationDon
     }
 
     // 3. Ground truth is fixed once per test set, before any output exists (and in parallel with the runs).
-    const truthP = Promise.all(
+    // Each set's ground truth is retried once; a set whose ground truth still fails is left out of scoring (its runs
+    // are not thrown away with the rest).
+    const truthFor = (set: (typeof sets)[number]) => {
+      const body = {
+        action_description: actionDescription,
+        customer_data: set.customer.slice(0, MAX_CHARS),
+        reference_data: set.reference.slice(0, MAX_CHARS),
+        answer_key: set.answerKey
+      };
+      type Truth = { issues: Issue[]; source: string; finished_deliverable_expected?: boolean };
+      return postJson<Truth>("/api/skills/ground-truth", body).catch(() => postJson<Truth>("/api/skills/ground-truth", body));
+    };
+    const truthP = Promise.allSettled(
       sets.map((set) =>
-        postJson<{ issues: Issue[]; source: string; finished_deliverable_expected?: boolean }>("/api/skills/ground-truth", {
-          action_description: actionDescription,
-          customer_data: set.customer.slice(0, MAX_CHARS),
-          reference_data: set.reference.slice(0, MAX_CHARS),
-          answer_key: set.answerKey
-        }).then(async (r) => {
+        truthFor(set).then(async (r) => {
           const fmt = await contractP;
           // With a contract, format is scored on the contract only; the set's own items keep the substance. When the
           // rules say this case must stop (e.g. a price is missing), there is no finished deliverable to check the format of.
@@ -359,12 +430,14 @@ export function SkillEvaluationCenter({ status, ajd, candidates, onEvaluationDon
     setStage("judging");
     addLog(`All runs finished. Scoring each of ${runs.filter((r) => r.result).length} runs blind against a fixed ground truth.`);
     try {
-      const truths = await truthP;
+      const settledTruths = await truthP;
+      const truths = settledTruths.flatMap((t) => (t.status === "fulfilled" ? [t.value] : []));
+      if (truths.length === 0) throw new Error("Could not set the ground truth for any test set. Please run again.");
+      if (truths.length < sets.length) addLog(`Ground truth failed for ${sets.length - truths.length} test set(s) — those runs are left out of scoring.`);
       setContract(await contractP);
       const truthBySet = new Map(truths.map((t) => [t.setId, t.issues]));
-      const judgements = await pool(
-        runs
-          .filter((r) => r.result)
+      const judgeTasks = runs
+          .filter((r) => r.result && truthBySet.has(r.setId))
           .map((r) => async () => {
             const set = sets.find((s) => s.id === r.setId)!;
             const body = {
@@ -384,9 +457,14 @@ export function SkillEvaluationCenter({ status, ajd, candidates, onEvaluationDon
               }
             }
             return { ...r, judgement: null };
-          }),
-        6
-      );
+          });
+      // The first judgement of each test set runs alone, so it stores the set's shared prefix (data + ground truth) in
+      // the cache; the rest of the set then reads it instead of paying for it again.
+      const toJudge = runs.filter((r) => r.result && truthBySet.has(r.setId));
+      const firstIdx = new Set(Array.from(truthBySet.keys()).map((setId) => toJudge.findIndex((r) => r.setId === setId)).filter((i) => i >= 0));
+      const firsts = await Promise.all(judgeTasks.filter((_, i) => firstIdx.has(i)).map((task) => task()));
+      const rest = await pool(judgeTasks.filter((_, i) => !firstIdx.has(i)), 6);
+      const judgements = [...firsts, ...rest];
       const unscored = judgements.filter((j) => !j.judgement).length;
       if (unscored > 0) addLog(`${unscored} run(s) could not be scored and were left out — they are not counted as zero.`);
       setUnscoredRuns(unscored);
@@ -402,7 +480,7 @@ export function SkillEvaluationCenter({ status, ajd, candidates, onEvaluationDon
         const id = lane.candidate.candidate_id;
         const judgedAll = judgements.filter((j) => j.laneId === id && j.judgement);
         // Score a repetition only when every test set in it was judged; a partial one would read as misses.
-        const completeReps = reps.filter((rep) => judgedAll.filter((j) => j.rep === rep).length >= sets.length);
+        const completeReps = reps.filter((rep) => judgedAll.filter((j) => j.rep === rep).length >= truths.length);
         const mine = judgedAll.filter((j) => completeReps.includes(j.rep));
         const repScores = completeReps.map((rep) =>
           scoreRun(
@@ -619,11 +697,34 @@ export function SkillEvaluationCenter({ status, ajd, candidates, onEvaluationDon
                 <textarea
                   rows={6}
                   value={customerData}
-                  onChange={(e) => setCustomerData(e.target.value)}
-                  placeholder="Paste records, or upload a .csv / .txt file"
+                  onChange={(e) => {
+                    setSheets(null);
+                    setCustomerData(e.target.value);
+                  }}
+                  dir="auto"
+                  placeholder="Paste records, or upload an Excel, .csv or .txt file"
                   className="w-full rounded border border-command-border bg-command-bg p-2 font-mono text-xs text-command-text"
                 />
-                <input type="file" accept={UPLOAD_ACCEPT} onChange={(e) => e.target.files?.[0] && readFile(e.target.files[0], setCustomerData)} className="text-xs text-command-muted" />
+                <input type="file" accept={UPLOAD_ACCEPT} onChange={(e) => e.target.files?.[0] && readCustomerFile(e.target.files[0])} className="text-xs text-command-muted" />
+                {sheets && sheets.length > 1 ? (
+                  <div className="flex flex-wrap items-center gap-2">
+                    <span className="font-mono text-[11px] uppercase tracking-[0.14em] text-command-muted">Sheets sent:</span>
+                    {sheets.map((sh) => {
+                      const on = usedSheets.includes(sh.name);
+                      return (
+                        <button
+                          key={sh.name}
+                          type="button"
+                          aria-pressed={on}
+                          onClick={() => setUsedSheets(on ? usedSheets.filter((n) => n !== sh.name) : [...usedSheets, sh.name])}
+                          className={`rounded-full border px-3 py-1 text-xs ${on ? "border-command-action bg-command-action/15 text-command-text" : "border-command-border text-command-muted line-through"}`}
+                        >
+                          {sh.name} · {sh.rows}
+                        </button>
+                      );
+                    })}
+                  </div>
+                ) : null}
 
                 <p className="pt-2 font-mono text-xs uppercase tracking-[0.14em] text-command-muted">Reference (optional) — price list, catalog, policy</p>
                 <textarea
@@ -660,8 +761,8 @@ export function SkillEvaluationCenter({ status, ajd, candidates, onEvaluationDon
                   onChange={(e) => setRepeats(Number(e.target.value))}
                   className="rounded border border-command-border bg-command-bg px-2 py-1 font-mono text-xs"
                 >
-                  <option value={1}>1 (fast — about 3 minutes)</option>
-                  <option value={3}>3 (firmer answer, shows run-to-run range — about 8 minutes)</option>
+                  <option value={1}>1 (fast — about 4 minutes)</option>
+                  <option value={3}>3 (firmer answer, shows run-to-run range — about 10 minutes)</option>
                 </select>
               </label>
 
@@ -842,12 +943,12 @@ export function SkillEvaluationCenter({ status, ajd, candidates, onEvaluationDon
                 {scenarios.map((sc, i) => (
                   <div key={i}>
                     <p className="text-sm font-semibold text-command-text">S{i + 1} · {sc.title}</p>
-                    <pre className="mt-1 max-h-40 overflow-auto whitespace-pre-wrap rounded border border-command-border bg-command-bg p-2 text-[11px] text-command-text">{sc.customer_data}</pre>
+                    <pre dir="auto" style={{ unicodeBidi: "plaintext" }} className="mt-1 max-h-40 overflow-auto whitespace-pre-wrap rounded border border-command-border bg-command-bg p-2 text-[11px] text-command-text">{sc.customer_data}</pre>
                     {sc.reference_data ? (
-                      <pre className="mt-1 max-h-24 overflow-auto whitespace-pre-wrap rounded border border-command-border bg-command-bg p-2 text-[11px] text-command-muted">{sc.reference_data}</pre>
+                      <pre dir="auto" style={{ unicodeBidi: "plaintext" }} className="mt-1 max-h-24 overflow-auto whitespace-pre-wrap rounded border border-command-border bg-command-bg p-2 text-[11px] text-command-muted">{sc.reference_data}</pre>
                     ) : null}
                     <p className="mt-1 font-mono text-[10px] uppercase tracking-[0.12em] text-command-muted">Answer key</p>
-                    <pre className="whitespace-pre-wrap text-[11px] text-command-muted">{sc.answer_key}</pre>
+                    <pre dir="auto" style={{ unicodeBidi: "plaintext" }} className="whitespace-pre-wrap text-[11px] text-command-muted">{sc.answer_key}</pre>
                   </div>
                 ))}
               </div>
@@ -1003,7 +1104,7 @@ export function SkillEvaluationCenter({ status, ajd, candidates, onEvaluationDon
                 {lane.skillMd && (
                   <details>
                     <summary className="cursor-pointer font-mono text-[11px] uppercase tracking-[0.14em] text-command-muted">SKILL.md</summary>
-                    <pre className="mt-2 max-h-72 overflow-auto whitespace-pre-wrap rounded border border-command-border bg-command-bg p-2 text-[11px] text-command-text">{lane.skillMd}</pre>
+                    <pre dir="auto" style={{ unicodeBidi: "plaintext" }} className="mt-2 max-h-72 overflow-auto whitespace-pre-wrap rounded border border-command-border bg-command-bg p-2 text-[11px] text-command-text">{lane.skillMd}</pre>
                   </details>
                 )}
                 {lane.skillMd && (

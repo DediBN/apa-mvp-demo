@@ -51,10 +51,19 @@ export async function POST(request: Request) {
       (body.output?.deliverable?.trim() ? `\n\nDELIVERABLE (exactly as handed over)\n"""${body.output.deliverable.slice(0, MAX)}"""` : "\n\nDELIVERABLE: none produced");
     const result = await pinnedJson<{ found: string[]; false_flags: Array<{ item: string; why: string }>; unsupported: number; did_task?: boolean; verdict: string }>(
       SYSTEM,
-      `TASK\n${body.action_description ?? ""}\n\nDATA\n"""${body.customer_data.slice(0, MAX)}"""\n\nREFERENCE\n"""${(body.reference_data || "(none)").slice(0, MAX)}"""\n\n` +
-        `GROUND TRUTH\n${issues.map((i) => `${i.id} [${i.kind}] ${i.description}`).join("\n")}\n\nRUN\n${run}\n\n` +
-        "Submit found, false_flags, unsupported, did_task and verdict.",
-      2000,
+      // Task, data, reference and ground truth are the same for every run of a test set: that prefix is cached, so
+      // only the first judgement of a set pays for it in full. The run being judged follows.
+      [
+        {
+          type: "text",
+          text:
+            `TASK\n${body.action_description ?? ""}\n\nDATA\n"""${body.customer_data.slice(0, MAX)}"""\n\nREFERENCE\n"""${(body.reference_data || "(none)").slice(0, MAX)}"""\n\n` +
+            `GROUND TRUTH\n${issues.map((i) => `${i.id} [${i.kind}] ${i.description}`).join("\n")}`,
+          cache_control: { type: "ephemeral" }
+        },
+        { type: "text", text: `RUN\n${run}\n\nSubmit found, false_flags, unsupported, did_task and verdict.` }
+      ],
+      4000,
       {
         type: "object",
         properties: {

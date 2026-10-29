@@ -70,10 +70,12 @@ export async function POST(request: Request) {
       try {
         const response = await anthropic.messages.create({
           model,
-          max_tokens: 2500,
+          // Under 900 words in Hebrew is ~3k tokens; 2,500 cut skills off without anyone noticing.
+          max_tokens: 6000,
           system: SYSTEM,
           messages: [{ role: "user", content: user }]
         });
+        if (response.stop_reason === "max_tokens") throw new Error("The skill was cut off");
         const raw = response.content
           .map((block) => (block.type === "text" ? block.text : ""))
           .join("\n")

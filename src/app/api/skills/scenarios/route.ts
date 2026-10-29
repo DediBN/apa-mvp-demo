@@ -3,7 +3,7 @@
 // so the test is not written to favor one option.
 
 import { NextResponse } from "next/server";
-import { claudeJson } from "../../../../lib/skills/claude-json";
+import { pinnedJson } from "../../../../lib/skills/pinned-json";
 import type { GeneratedScenario } from "../../../../lib/skills/types";
 
 // Needs Vercel Fluid compute (Hobby max 300s). Long documents + a skill exceed 60s.
@@ -51,15 +51,36 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: "job_title, business_need or mission is required" }, { status: 400 });
     }
 
-    const result = await claudeJson<{ scenarios: GeneratedScenario[] }>(
+    // Structured answer (forced tool call): sample data full of Hebrew quotes (מ"ל, ש"ח) cannot break parsing.
+    const result = await pinnedJson<{ scenarios: GeneratedScenario[] }>(
       SYSTEM,
       `job_title: ${body.job_title ?? ""}\nbusiness_need: ${body.business_need ?? ""}\nmission: ${body.mission ?? ""}\n` +
         `kpis: ${JSON.stringify(body.kpis ?? [])}\n\n` +
         (body.variant === "hard"
           ? "Make this a HARD scenario: messier formatting, more records, subtler issues, and two false-alarm traps.\n"
           : "Make this a STANDARD scenario: typical everyday data with clear structure.\n") +
-        `Create ${count} scenario${count === 1 ? "" : "s"}. Return {"scenarios":[{"title":"","customer_data":"","reference_data":"","answer_key":""}]}`,
-      count === 1 ? 4500 : 9000
+        `Create ${count} scenario${count === 1 ? "" : "s"} and submit them.`,
+      count === 1 ? 8000 : 16000,
+      {
+        type: "object",
+        properties: {
+          scenarios: {
+            type: "array",
+            items: {
+              type: "object",
+              properties: {
+                title: { type: "string" },
+                customer_data: { type: "string" },
+                reference_data: { type: "string" },
+                answer_key: { type: "string", description: "One checkable expected outcome per line" }
+              },
+              required: ["title", "customer_data", "reference_data", "answer_key"]
+            }
+          }
+        },
+        required: ["scenarios"]
+      },
+      { model: process.env.APA_SKILLS_MODEL?.trim() || "claude-sonnet-5-5" }
     );
 
     const scenarios = (result.scenarios ?? [])
