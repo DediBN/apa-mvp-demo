@@ -31,7 +31,10 @@ const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 // The answer comes back as a forced tool call against a JSON schema, so the model never hand-writes JSON
 // (Hebrew text such as ש"ח inside a string used to break parsing). Transient failures (rate limits, overload,
 // a malformed answer) are retried with backoff — the model stays the same on every attempt.
-export async function pinnedJson<T>(system: string, user: string, maxTokens = 2000, schema?: Record<string, unknown>): Promise<T> {
+// `user` may be content blocks, so a caller can mark a shared prefix for prompt caching.
+export type UserContent = string | Array<{ type: "text"; text: string; cache_control?: { type: "ephemeral" } }>;
+
+export async function pinnedJson<T>(system: string, user: UserContent, maxTokens = 2000, schema?: Record<string, unknown>): Promise<T> {
   const anthropic = createAnthropicClient();
   let lastError: unknown;
   for (let attempt = 0; attempt < ATTEMPTS; attempt += 1) {

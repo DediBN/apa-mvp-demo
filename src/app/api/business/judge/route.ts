@@ -3,8 +3,7 @@
 // Table rules are then checked structurally in code — text that merely says "table" does not pass.
 
 import { NextResponse } from "next/server";
-import { createAnthropicClient } from "../../../../lib/anthropic-client";
-import { extractJsonObject } from "../../../../lib/skills/claude-json";
+import { JUDGE_MODEL, pinnedJson } from "../../../../lib/skills/pinned-json";
 import { applyDeterministicChecks, type JudgedOutput, type Rule, type RuleVerdict } from "../../../../lib/business/scoring";
 
 export const maxDuration = 120;
@@ -50,41 +49,40 @@ export async function POST(request: Request) {
     const own =
       `REQUEST:\n"""${(body.input || "").slice(0, 5000)}"""\n\n` +
       `WORK TO CHECK:\n"""${body.output.slice(0, 12000)}"""\n\n` +
-      'Return {"verdicts":{"R1":"met"},"invented":[""],"asked_for_missing":[""],"did_task":true,"note":"one plain sentence"}';
+      "Submit verdicts (one per rule id), invented, asked_for_missing, did_task and note.";
 
-    // One pinned judge model, no fallback chain, so every output in a run is judged the same way.
-    const model = process.env.APA_JUDGE_MODEL?.trim() || process.env.APA_SKILLS_MODEL?.trim() || "claude-sonnet-5";
-    const anthropic = createAnthropicClient();
-    // Transient failures (rate limit, overload, a malformed answer) are retried with backoff on the same model.
-    let parsed: { verdicts: Record<string, string>; invented: string[]; asked_for_missing: string[]; did_task?: boolean; note: string } | null = null;
-    let lastError: unknown;
-    for (let attempt = 0; attempt < 3 && !parsed; attempt += 1) {
-      if (attempt > 0) await new Promise((r) => setTimeout(r, 2000 * 2 ** (attempt - 1) + Math.random() * 800));
-      try {
-    const response = await anthropic.messages.create({
-      model,
-      max_tokens: 2000,
-      system: `${SYSTEM}\nRespond with strict JSON only.`,
-      messages: [
-        {
-          role: "user",
-          content: [
-            { type: "text", text: shared, cache_control: { type: "ephemeral" } },
-            { type: "text", text: own }
-          ]
-        }
-      ]
-    });
-    const text = response.content.map((b) => (b.type === "text" ? b.text : "")).join("\n");
-    parsed = extractJsonObject<{ verdicts: Record<string, string>; invented: string[]; asked_for_missing: string[]; did_task?: boolean; note: string }>(text);
-      } catch (error) {
-        lastError = error;
-        const status = (error as { status?: number })?.status;
-        console.warn("[business/judge] attempt", attempt + 1, status ?? "", error instanceof Error ? error.message : error);
-        if (status && status >= 400 && status < 500 && status !== 408 && status !== 409 && status !== 429) break;
+    // The answer comes back as a forced tool call against a schema (one pinned judge model, retried on transient
+    // failures), so Hebrew text with quotes — מ"ל, ש"ח — inside the answer cannot break parsing.
+    const parsed = await pinnedJson<{
+      verdicts: Record<string, string>;
+      invented: string[];
+      asked_for_missing: string[];
+      did_task?: boolean;
+      note: string;
+    }>(
+      SYSTEM,
+      [
+        { type: "text", text: shared, cache_control: { type: "ephemeral" } },
+        { type: "text", text: own }
+      ],
+      2000,
+      {
+        type: "object",
+        properties: {
+          verdicts: {
+            type: "object",
+            description: "Rule id -> met | not_met | not_applicable",
+            additionalProperties: { type: "string", enum: ["met", "not_met", "not_applicable"] }
+          },
+          invented: { type: "array", items: { type: "string" } },
+          asked_for_missing: { type: "array", items: { type: "string" } },
+          did_task: { type: "boolean", description: "false if the work declined or only explained why it cannot do the task" },
+          note: { type: "string", description: "one plain sentence" }
+        },
+        required: ["verdicts", "invented", "asked_for_missing", "did_task", "note"]
       }
-    }
-    if (!parsed) throw lastError instanceof Error ? lastError : new Error("Judge failed");
+    );
+    const model = JUDGE_MODEL;
 
     const verdicts: Record<string, RuleVerdict> = {};
     for (const rule of rules) {
