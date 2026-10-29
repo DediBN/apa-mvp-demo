@@ -43,12 +43,13 @@ function LanguageToggle() {
 function HomePageContent() {
   const { mode, setMode } = useUIMode();
   const { t, lang, setLang } = useLang();
-  // ?lang=he|en sets the language (the landing page passes it); ?mode=technology opens the technical view.
+  // ?lang=he|en sets the language (the landing page passes it); the tool opens in the technical view by default,
+  // ?mode=business opens the plain-language view.
   useEffect(() => {
     const q = new URLSearchParams(window.location.search);
     const l = q.get("lang");
     if (l === "he" || l === "en") setLang(l);
-    if (q.get("mode") === "technology") setMode("technology");
+    if (q.get("mode") === "business") setMode("business");
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
   const business = mode === "business";
@@ -81,7 +82,7 @@ function HomePageContent() {
 export function HomePageShell() {
   return (
     <LangProvider>
-      <UIModeProvider initialMode="business">
+      <UIModeProvider initialMode="technology">
         <HomePageContent />
       </UIModeProvider>
     </LangProvider>
