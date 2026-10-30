@@ -13,6 +13,7 @@ import { ResultSummaryCard } from "./result-summary-card";
 import { AgentReadinessCheck } from "./agent-readiness-check";
 import { SkillEvaluationCenter } from "./skill-evaluation-center";
 import { takeHandoff } from "../../lib/handoff";
+import { SAMPLE_ANSWER_KEYS, type SampleKey } from "../../lib/samples";
 
 const SHOW_AGENT_SCORECARD = false;
 import { Candidate } from "../../lib/research-agent/mock";
@@ -96,6 +97,8 @@ export function IntakeTerminal() {
   const [readinessAjd, setReadinessAjd] = useState<AJD | null>(null);
   // A file handed over from the landing page goes to Step 03 as the real data to test on.
   const [handoffFile, setHandoffFile] = useState<File | null>(null);
+  // The demo example picked on the landing page: its known answers become the answer key in Step 03.
+  const [handoffKey, setHandoffKey] = useState<string | undefined>(undefined);
   const [gateOverride, setGateOverride] = useState(false);
   const [logs, setLogs] = useState<string[]>([
     `[${buildTimestamp()}] System ready. State=IDLE`
@@ -225,6 +228,7 @@ export function IntakeTerminal() {
     if (!h) return;
     setBusinessNeed(h.request);
     if (h.file) setHandoffFile(h.file);
+    if (h.file && h.example && h.example in SAMPLE_ANSWER_KEYS) setHandoffKey(SAMPLE_ANSWER_KEYS[h.example as SampleKey]);
     void startIntake(h.request, Boolean(h.file));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -596,6 +600,7 @@ export function IntakeTerminal() {
           addLog={addLog}
           onEvaluationDone={handleEvaluationDone}
           initialFile={handoffFile}
+          initialAnswerKey={handoffKey}
           preferData={ajd?.feasibility?.status === "needs_file" || Boolean(handoffFile)}
         />
       </div>

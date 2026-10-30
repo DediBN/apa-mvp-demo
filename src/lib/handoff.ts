@@ -6,6 +6,7 @@ export interface Handoff {
   request: string;
   lang: "en" | "he";
   file?: { name: string; type: string; base64: string };
+  example?: string; // which demo example was picked (its known answers are used for scoring)
 }
 
 const KEY = "apa-handoff";
@@ -19,9 +20,9 @@ function toBase64(buffer: ArrayBuffer): string {
 }
 
 // Returns false when the file could not be carried over (too large or storage unavailable); the request still is.
-export async function saveHandoff(request: string, lang: "en" | "he", file: File | null): Promise<boolean> {
+export async function saveHandoff(request: string, lang: "en" | "he", file: File | null, example?: string | null): Promise<boolean> {
   let fileOk = true;
-  let payload: Handoff = { request, lang };
+  let payload: Handoff = { request, lang, ...(example ? { example } : {}) };
   if (file) {
     if (file.size <= MAX_FILE_BYTES) {
       payload = { ...payload, file: { name: file.name, type: file.type, base64: toBase64(await file.arrayBuffer()) } };
@@ -41,7 +42,7 @@ export async function saveHandoff(request: string, lang: "en" | "he", file: File
 }
 
 // Reads the handoff once and clears it, so a reload of /app starts fresh.
-export function takeHandoff(): { request: string; lang: "en" | "he"; file: File | null } | null {
+export function takeHandoff(): { request: string; lang: "en" | "he"; file: File | null; example?: string } | null {
   let raw: string | null = null;
   try {
     raw = window.sessionStorage.getItem(KEY);
@@ -60,7 +61,7 @@ export function takeHandoff(): { request: string; lang: "en" | "he"; file: File 
       for (let i = 0; i < bin.length; i += 1) bytes[i] = bin.charCodeAt(i);
       file = new File([bytes], h.file.name, { type: h.file.type || "application/octet-stream" });
     }
-    return { request: h.request, lang: h.lang === "he" ? "he" : "en", file };
+    return { request: h.request, lang: h.lang === "he" ? "he" : "en", file, example: h.example };
   } catch {
     return null;
   }

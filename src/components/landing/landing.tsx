@@ -70,8 +70,8 @@ const EXAMPLES: Array<{ key: string; label: Record<Lang, string>; request: Recor
     key: "calendar",
     label: { en: "Track the appointment calendar", he: "מעקב אחרי יומן התורים" },
     request: {
-      en: "Track my appointment calendar: regular clients who haven't come back, double bookings, no-shows and this month's birthdays",
-      he: "לעקוב אחרי יומן התורים: לקוחות קבועות שלא חזרו, תורים כפולים, אי־הגעות וימי הולדת החודש"
+      en: "Track my appointment calendar (as of 27.10.2026): regular clients who haven't come back, double bookings, repeat no-shows, bookings that clash with a client's notes, and November birthdays",
+      he: "לעקוב אחרי יומן התורים (נכון ל־27.10.2026): לקוחות קבועות שלא חזרו, תורים כפולים, אי־הגעות חוזרות, תורים שמתנגשים עם הערות הלקוחה, וימי הולדת בנובמבר"
     }
   }
 ];
@@ -163,7 +163,8 @@ export function Landing() {
     e.preventDefault();
     if (!request.trim() || busy) return;
     setBusy(true);
-    const fileOk = await saveHandoff(request.trim(), lang, file);
+    // The example key travels only while the example's own file and request are untouched.
+    const fileOk = await saveHandoff(request.trim(), lang, file, example && file?.name === SAMPLE_NAME ? example : null);
     if (!fileOk) setNote(t.tooBig);
     window.location.href = `/app?start=1&lang=${lang}`;
   }

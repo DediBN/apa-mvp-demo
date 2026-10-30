@@ -52,9 +52,11 @@ For EVERY discrete result item, classify it into exactly one of these five categ
 
 Never present a confidence or savings number that isn't grounded in what was actually given.
 
-Keep the output compact: report every exception, discrepancy or open question as its own item, but group
-routine lines that check out into ONE "found_in_data" item per group (e.g. "24 invoice lines match the agreed prices").
-Never more than 15 items in total, each detail at most 2 sentences.
+Go through EVERY record in the data and check each one; never stop early or sample. Report every exception,
+discrepancy or open question as its own item, naming the record (id / row / date). Group only routine lines that
+check out, into ONE "found_in_data" item per group (e.g. "38 products are at or above minimum stock").
+At most 30 items, each detail at most 2 sentences. Never drop an exception to stay under the limit — group more
+of the routine lines instead. The deliverable must include every exception found.
 
 DELIVERABLE: if the action asks you to produce something a person would send or use (a quote, a letter, a reply,
 a report, a table), write the finished thing in "deliverable" as Markdown, exactly as it should be handed over —

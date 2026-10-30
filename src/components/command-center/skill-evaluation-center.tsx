@@ -27,6 +27,7 @@ interface SkillEvaluationCenterProps {
   onEvaluationDone: (results: CandidateEvaluationResult[]) => void;
   addLog: (line: string) => void;
   initialFile?: File | null; // handed over from the landing page: used as the real data
+  initialAnswerKey?: string; // known answers for a demo example file
   preferData?: boolean; // the task runs on the business's own file: open on "Test on my real data"
 }
 
@@ -141,7 +142,7 @@ function toEvaluationResult(lane: Lane, score: OptionScore | undefined): Candida
   };
 }
 
-export function SkillEvaluationCenter({ status, ajd, candidates, onEvaluationDone, addLog, initialFile, preferData }: SkillEvaluationCenterProps) {
+export function SkillEvaluationCenter({ status, ajd, candidates, onEvaluationDone, addLog, initialFile, initialAnswerKey, preferData }: SkillEvaluationCenterProps) {
   const [customerData, setCustomerData] = useState("");
   const [referenceData, setReferenceData] = useState("");
   const [answerKey, setAnswerKey] = useState("");
@@ -230,8 +231,9 @@ export function SkillEvaluationCenter({ status, ajd, candidates, onEvaluationDon
     if (!initialFile || initialRead || !ajd) return;
     setInitialRead(true);
     setMode("data");
+    if (initialAnswerKey) setAnswerKey(initialAnswerKey);
     void readCustomerFile(initialFile);
-  }, [initialFile, initialRead, ajd, readCustomerFile]);
+  }, [initialFile, initialRead, ajd, readCustomerFile, initialAnswerKey]);
 
   const updateLane = (id: string, patch: Partial<Lane>) =>
     setLanes((prev) => prev.map((lane) => (lane.candidate.candidate_id === id ? { ...lane, ...patch } : lane)));
@@ -879,9 +881,13 @@ export function SkillEvaluationCenter({ status, ajd, candidates, onEvaluationDon
                       {tile("Wrong or made up", wrong(best), base ? wrong(base) : "—", "low")}
                     </div>
                     <p className="mt-3 text-xs text-command-muted">
-                      {total} checks with known answers, on{" "}
-                      {judge.ground_truth === "generated_scenarios" ? `${scenarios.length} generated test cases` : "your data"}. Every option ran on the
-                      same model with the same request; one judge scored each result blind.
+                      {total} checks,{" "}
+                      {judge.ground_truth === "generated_scenarios"
+                        ? `with known answers, on ${scenarios.length} generated test cases`
+                        : judge.ground_truth === "answer_key"
+                          ? "from the answer key, on your data"
+                          : "from an independent audit of your data by the judge (indicative — add an answer key for exact scoring)"}
+                      . Every option ran on the same model with the same request; one judge scored each result blind.
                     </p>
                     {bestLane?.result?.deliverable || baseLane?.result?.deliverable ? (
                       <div className="mt-4 grid gap-3 md:grid-cols-2">
