@@ -666,6 +666,15 @@ export function SkillEvaluationCenter({ status, ajd, candidates, onEvaluationDon
 
       {stage === "input" && (
         <div className="space-y-4">
+          {preferData && mode === "data" && !customerData.trim() ? (
+            <div className="rounded-lg border border-amber-400/50 bg-amber-400/10 p-3 text-sm text-command-text">
+              This skill works on the business&apos;s own file. Attach it below (Excel is fine) for a real test — or switch to{" "}
+              <button type="button" onClick={() => setMode("scenarios")} className="font-semibold text-command-action underline">
+                generated test scenarios
+              </button>{" "}
+              to see how it works on made-up data.
+            </div>
+          ) : null}
           <div className="inline-flex rounded-lg border border-command-border p-1 font-mono text-xs">
             <button
               type="button"
