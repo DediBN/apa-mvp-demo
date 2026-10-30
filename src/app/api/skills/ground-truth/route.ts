@@ -24,6 +24,10 @@ If an ANSWER KEY is given, the items are exactly its lines (one item per distinc
 drop or merge meaning). Otherwise audit the DATA yourself (against the REFERENCE if given) and list every real
 exception or requirement the task asks for, only things you can point to in the data.
 
+When you audit the data yourself, go record by record and check each condition exactly as stated (for example
+"below minimum" means strictly less than the minimum). Name every record an item applies to. Never state a count
+or total you have not enumerated record by record.
+
 Tag each item:
 - "correctness": the substance must be right — a record, number, amount, condition, rule applied, something to
   flag, refuse or ask for.

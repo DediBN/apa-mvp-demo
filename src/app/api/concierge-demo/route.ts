@@ -145,8 +145,10 @@ export async function POST(req: NextRequest) {
     const anthropic = createAnthropicClient();
 
     // One pinned model for every option (and the no-skill baseline), so differences come from the skill only.
-    // The fast model keeps the many test runs cheap; set APA_RUN_MODEL to run them on another model.
-    const model = process.env.APA_RUN_MODEL?.trim() || process.env.APA_MODEL_FAST?.trim() || "claude-haiku-5-5";
+    // Technology mode runs a demanding task framework (classified findings + a finished deliverable on a whole
+    // sheet); the fast model declined or miscounted there in live tests, so the strong model is the default.
+    // Set APA_RUN_MODEL (e.g. claude-haiku-5-5) to trade quality for cost.
+    const model = process.env.APA_RUN_MODEL?.trim() || process.env.APA_SKILLS_MODEL?.trim() || "claude-sonnet-5";
     // Rate limits and overload are retried on the same model, with backoff, before the run counts as failed.
     let response: Awaited<ReturnType<typeof anthropic.messages.create>> | null = null;
     let lastError: unknown;
