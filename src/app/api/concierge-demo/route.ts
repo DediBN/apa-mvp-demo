@@ -150,21 +150,29 @@ export async function POST(req: NextRequest) {
     // Rate limits and overload are retried on the same model, with backoff, before the run counts as failed.
     let response: Awaited<ReturnType<typeof anthropic.messages.create>> | null = null;
     let lastError: unknown;
+    // Some models reject a forced tool call; then the tool is offered with tool_choice auto and required in the prompt.
+    let forced = true;
     for (let attempt = 0; attempt < 3 && !response; attempt += 1) {
       if (attempt > 0) await new Promise((r) => setTimeout(r, 2000 * 2 ** (attempt - 1) + Math.random() * 800));
       try {
+        const system = skill_md?.trim() ? SYSTEM_PROMPT + skillBlock(skill_md, skill_name) : SYSTEM_PROMPT;
         response = await anthropic.messages.create({
           model,
           max_tokens: 12000,
-          system: skill_md?.trim() ? SYSTEM_PROMPT + skillBlock(skill_md, skill_name) : SYSTEM_PROMPT,
+          system: forced ? system : `${system}\n\nAnswer only by calling the submit tool, once.`,
           // Structured output: the model never hand-writes JSON, so quotes inside Hebrew text (ש"ח) can't break parsing.
           tools: [{ name: "submit", description: "Submit the result of the action.", input_schema: RESULT_SCHEMA as never }],
-          tool_choice: { type: "tool", name: "submit" },
+          tool_choice: forced ? { type: "tool", name: "submit" } : { type: "auto" },
           messages: [{ role: "user", content: userContent }],
         });
       } catch (error) {
         lastError = error;
         const status = (error as { status?: number })?.status;
+        if (forced && status === 400 && /tool_choice/i.test(error instanceof Error ? error.message : "")) {
+          forced = false;
+          attempt -= 1;
+          continue;
+        }
         console.warn("[concierge-demo] attempt", attempt + 1, status ?? "", error instanceof Error ? error.message : error);
         if (status && status >= 400 && status < 500 && status !== 408 && status !== 409 && status !== 429) break;
       }

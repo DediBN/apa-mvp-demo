@@ -46,6 +46,9 @@ export async function pinnedJson<T>(
 ): Promise<T> {
   const anthropic = createAnthropicClient();
   const model = opts.model || JUDGE_MODEL;
+  // Some models reject a forced tool call ("tool_choice ... not supported for this model"). Then the tool is offered
+  // with tool_choice auto and the model is told to answer only through it.
+  let forced = true;
   let lastError: unknown;
   for (let attempt = 0; attempt < ATTEMPTS; attempt += 1) {
     if (attempt > 0) await sleep(1500 * 2 ** (attempt - 1) + Math.random() * 500);
@@ -54,9 +57,9 @@ export async function pinnedJson<T>(
         const response = await anthropic.messages.create({
           model,
           max_tokens: maxTokens,
-          system,
+          system: forced ? system : `${system}\nAnswer only by calling the submit tool, once.`,
           tools: [{ name: "submit", description: "Submit the result.", input_schema: schema as never }],
-          tool_choice: { type: "tool", name: "submit" },
+          tool_choice: forced ? { type: "tool", name: "submit" } : { type: "auto" },
           messages: [{ role: "user", content: user }]
         });
         if (response.stop_reason === "max_tokens") throw new TruncatedError(`Answer cut off at ${maxTokens} tokens`);
@@ -78,6 +81,11 @@ export async function pinnedJson<T>(
       console.warn("[pinnedJson] attempt", attempt + 1, error instanceof Error ? error.message : error);
       if (error instanceof TruncatedError) break; // a retry with the same limit would be cut off again
       const status = (error as { status?: number })?.status;
+      if (forced && status === 400 && /tool_choice/i.test(error instanceof Error ? error.message : "")) {
+        forced = false;
+        attempt -= 1; // switching mode is not a failed attempt
+        continue;
+      }
       // Bad requests and auth errors will not get better on retry.
       if (status && status >= 400 && status < 500 && status !== 408 && status !== 409 && status !== 429) break;
     }
