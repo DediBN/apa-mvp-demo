@@ -869,18 +869,24 @@ export function SkillEvaluationCenter({ status, ajd, candidates, onEvaluationDon
             const bestLane = best ? laneFor(best.key) : undefined;
             const shownLane = shownKey ? laneFor(shownKey) : undefined;
             const baseLane = laneFor("skill_baseline_none");
+            // The card speaks in checks right (correctness + format), so its verdict follows that same count — a skill
+            // that gets every fact and the required format right is not "no clear difference" from one that misses half.
+            const diff = best && base ? best.found.length - base.found.length : 0;
+            const margin = Math.max(2, Math.ceil(total * 0.1));
+            const cardWin = Boolean(winner) && diff >= margin;
+            const cardLoss = Boolean(best) && diff <= -margin;
             const headline = notDone
               ? "No option actually did the task — so nothing is recommended."
               : !best
                 ? "No skill could be compared on this run."
                 : !winner
                   ? `No skill qualified for a recommendation. Best skill: ${best.found.length} of ${total} checks right; Claude alone: ${base ? base.found.length : "—"} of ${total}.`
-                  : winnerBeatsBaseline
-                  ? `With the skill: ${best.found.length} of ${total} checks right. Claude alone: ${base ? base.found.length : "—"} of ${total}.`
-                  : inNoise
-                    ? `No clear difference: ${best.found.length} of ${total} with the skill, ${base ? base.found.length : "—"} of ${total} without.`
-                    : `Claude alone did better on this test: ${base ? base.found.length : "—"} of ${total}, against ${best.found.length} of ${total} with the best skill.`;
-            const tone = winnerBeatsBaseline ? "border-emerald-400/50 bg-emerald-400/5" : "border-amber-400/50 bg-amber-400/5";
+                  : cardWin
+                    ? `With the skill: ${best.found.length} of ${total} checks right. Claude alone: ${base ? base.found.length : "—"} of ${total}.`
+                    : cardLoss
+                      ? `Claude alone did better on this test: ${base ? base.found.length : "—"} of ${total}, against ${best.found.length} of ${total} with the best skill.`
+                      : `No clear difference: ${best.found.length} of ${total} with the skill, ${base ? base.found.length : "—"} of ${total} without.`;
+            const tone = cardWin ? "border-emerald-400/50 bg-emerald-400/5" : "border-amber-400/50 bg-amber-400/5";
             const tile = (label: string, a: string | number, b: string | number, good: "high" | "low") => {
               const na = Number(a);
               const nb = Number(b);
@@ -902,7 +908,7 @@ export function SkillEvaluationCenter({ status, ajd, candidates, onEvaluationDon
                 {best && !notDone ? (
                   <>
                     <p className="mt-1 text-sm text-command-muted">
-                      {winner && winnerBeatsBaseline ? "Recommended" : winner ? "Best skill" : "Best-scoring skill (not recommended — see Technical details)"}:{" "}
+                      {winner && (winnerBeatsBaseline || cardWin) ? "Recommended" : winner ? "Best skill" : "Best-scoring skill (not recommended — see Technical details)"}:{" "}
                       <span className="font-semibold text-command-text">{best.name}</span>
                       {bestLane?.kind === "custom" ? " — written for this need" : bestLane?.kind === "directory" ? ` — from ${bestLane.candidate.source}` : ""}.
                     </p>

@@ -198,7 +198,9 @@ export async function POST(req: NextRequest) {
       }
     }
     if (toolInput && Array.isArray(toolItems) && response.stop_reason !== "max_tokens") {
-      return NextResponse.json({ items: toolItems, summary: toolInput.summary ?? "", deliverable: toolInput.deliverable?.trim() || undefined });
+      // Models sometimes wrap the Markdown in an RTL <div>; the page renders Markdown, so the raw tag would show as text.
+      const deliverable = toolInput.deliverable?.replace(/<\/?div[^>]*>/gi, "").trim();
+      return NextResponse.json({ items: toolItems, summary: toolInput.summary ?? "", deliverable: deliverable || undefined });
     }
     if (toolInput) {
       console.error("[concierge-demo] unusable tool output", { stop_reason: response.stop_reason, itemsType: typeof toolInput.items });
