@@ -43,7 +43,6 @@ const MAX_TO_FETCH = 24;
 // Directory skills tested (+ custom skill + no-skill baseline). Two keeps a run to a few minutes; more rarely changes
 // the answer, since most extra matches score as weak fit.
 const MAX_SHORTLIST = 2;
-const MIN_SKILLS = 2; // always test at least this many directory skills when that many are readable
 const SKILL_EXCERPT_CHARS = 2500;
 const SKILL_CARRY_CHARS = 20000;
 
@@ -215,9 +214,10 @@ export async function POST(request: Request) {
         .filter(({ verdict }) => Boolean(verdict))
         .sort((a, b) => (b.verdict?.fit_score ?? 0) - (a.verdict?.fit_score ?? 0));
       const passing = scored.filter(({ verdict }) => (verdict?.fit_score ?? 0) >= MIN_FIT).slice(0, MAX_SHORTLIST);
-      // Always test at least MIN_SKILLS directory skills: top up with the best weaker matches (flagged as weak fit).
-      const topUp = scored.filter((entry) => !passing.includes(entry)).slice(0, Math.max(0, MIN_SKILLS - passing.length));
-      const shortlisted = [...passing, ...topUp];
+      // Only library skills that can actually be recommended are tested. Weak matches (a map tool for a car-seat
+      // advisor) can never win, so running them only cost time and crowded the results. With none, the comparison is
+      // the skill built for this need against Claude alone.
+      const shortlisted = passing;
 
       candidates = await Promise.all(
         shortlisted.map(async ({ entry, verdict }, i) => {

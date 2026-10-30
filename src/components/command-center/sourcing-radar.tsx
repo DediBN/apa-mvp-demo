@@ -160,7 +160,12 @@ export function SourcingRadar({ status, ajd, onShortlistReady, onFail, addLog }:
           const normalizedCandidates = result.slice(0, 5);
           setVisibleCount(0);
           setShortlist(normalizedCandidates);
-          addLog(`Shortlist upgraded from API: ${normalizedCandidates.length} skills matched to the Skill Spec.`);
+          const libraryCount = normalizedCandidates.filter((c) => c.candidate_id !== "skill_custom_ajd" && c.candidate_id !== "skill_baseline_none").length;
+          addLog(
+            libraryCount > 0
+              ? `Shortlist: ${libraryCount} library skill${libraryCount === 1 ? "" : "s"} that fit the task, plus a skill built for it and Claude alone.`
+              : "No library skill fits this need closely enough — the test compares a skill built for it against Claude alone."
+          );
         }
       })
       .catch((error) => {
