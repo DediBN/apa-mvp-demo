@@ -42,6 +42,9 @@ Then concise Markdown instructions that a capable model follows on the business'
 - stopping: follow the business's stop rules literally. If a rule says to stop (e.g. an item is not in the price
   list), do not produce a partial deliverable with totals — say clearly what is needed to continue and list exactly
   what is missing. Where no rule says to stop, complete the work and list any open point
+- a needed calculation rule the business did not give (e.g. how much to order, which of two prices to use): use the
+  simplest reasonable rule the data supports, state it in one line at the top of the result as an assumption to
+  confirm, and complete the work. Never stop the whole task over an unstated rule
 - no scripts, no code to execute, no network access, no external tools
 
 Write for the process described, not a generic template. Keep it under 900 words. No preamble, no code fences around the file.`;

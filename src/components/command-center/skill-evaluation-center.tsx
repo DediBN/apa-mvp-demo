@@ -835,7 +835,8 @@ export function SkillEvaluationCenter({ status, ajd, candidates, onEvaluationDon
           {/* The answer first: one sentence, three numbers, and the two results side by side. Everything else is under
               "Technical details" for whoever wants the method. */}
           {(() => {
-            const best = winner;
+            // With no recommendation (e.g. no option qualified), still show the best-scoring skill against Claude alone.
+            const best = winner ?? ranked.find((sc) => sc.key !== "skill_baseline_none");
             const base = baselineScore;
             const total = judge.issues.length;
             const wrong = (sc?: OptionScore) => (sc ? sc.false_flags.length + sc.unsupported : 0);
@@ -845,7 +846,9 @@ export function SkillEvaluationCenter({ status, ajd, candidates, onEvaluationDon
               ? "No option actually did the task — so nothing is recommended."
               : !best
                 ? "No skill could be compared on this run."
-                : winnerBeatsBaseline
+                : !winner
+                  ? `No skill qualified for a recommendation. Best skill: ${best.found.length} of ${total} checks right; Claude alone: ${base ? base.found.length : "—"} of ${total}.`
+                  : winnerBeatsBaseline
                   ? `With the skill: ${best.found.length} of ${total} checks right. Claude alone: ${base ? base.found.length : "—"} of ${total}.`
                   : inNoise
                     ? `No clear difference: ${best.found.length} of ${total} with the skill, ${base ? base.found.length : "—"} of ${total} without.`
@@ -872,7 +875,8 @@ export function SkillEvaluationCenter({ status, ajd, candidates, onEvaluationDon
                 {best && !notDone ? (
                   <>
                     <p className="mt-1 text-sm text-command-muted">
-                      {winnerBeatsBaseline ? "Recommended" : "Best skill"}: <span className="font-semibold text-command-text">{best.name}</span>
+                      {winner && winnerBeatsBaseline ? "Recommended" : winner ? "Best skill" : "Best-scoring skill (not recommended — see Technical details)"}:{" "}
+                      <span className="font-semibold text-command-text">{best.name}</span>
                       {bestLane?.kind === "custom" ? " — written for this need" : bestLane?.kind === "directory" ? ` — from ${bestLane.candidate.source}` : ""}.
                     </p>
                     <div className="mt-4 grid gap-3 md:grid-cols-3">
@@ -1236,7 +1240,7 @@ export function SkillEvaluationCenter({ status, ajd, candidates, onEvaluationDon
                         : `Correctness ${recommendedScore.correctness} vs ${baselineScore.correctness} for Claude with no skill. Claude alone did better on this test, so a skill is not needed for correctness${recommendedLane.kind === "custom" ? "; install it only if you want your process written down and applied the same way every time" : ""}.`
                     : recommendedScore
                       ? `Correctness ${recommendedScore.correctness}.`
-                      : "Not scored in this run — it is recommended because it was written for this exact process. Run again to measure it."}
+                      : "The test did not recommend it (see Result above). It is offered because it was written for this exact process."}
                 </p>
                 <div className="mt-3 flex flex-wrap items-center gap-3">
                   <button
