@@ -99,6 +99,15 @@ function buildEverydayRequest(ajd: AJD): string {
   ].join("\n");
 }
 
+function runModelParam(): "haiku" | "sonnet" | undefined {
+  try {
+    const v = new URLSearchParams(window.location.search).get("runModel");
+    return v === "haiku" || v === "sonnet" ? v : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 async function postJson<T>(url: string, body: unknown): Promise<T> {
   const res = await fetch(url, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
   const data = await res.json().catch(() => ({}));
@@ -383,7 +392,9 @@ export function SkillEvaluationCenter({ status, ajd, candidates, onEvaluationDon
               // must supply is the business's rules and process — the everyday request does not repeat them.
               reference_data: set.reference.slice(0, MAX_CHARS),
               skill_md: skillByLane.get(lane.candidate.candidate_id),
-              skill_name: lane.kind === "baseline" ? undefined : lane.candidate.name
+              skill_name: lane.kind === "baseline" ? undefined : lane.candidate.name,
+              // A/B test switch (?runModel=haiku|sonnet): the same model for every option in the run, so it stays fair.
+              run_model: runModelParam()
             };
             // One retry: a single transient failure should not knock a run out of the comparison.
             let lastError = "Run failed";

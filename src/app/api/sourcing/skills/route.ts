@@ -4,6 +4,7 @@
 import { NextResponse } from "next/server";
 import type { Candidate } from "../../../../lib/research-agent/mock";
 import { claudeJson } from "../../../../lib/skills/claude-json";
+import { pinnedJson } from "../../../../lib/skills/pinned-json";
 import { MIN_FIT } from "../../../../lib/business/scoring";
 import {
   SkillHit,
@@ -184,7 +185,9 @@ export async function POST(request: Request) {
 
       let screening: ScreeningResult = { results: [] };
       try {
-        screening = await claudeJson<ScreeningResult>(
+        // Structured answer on one model: the free-text version failed to parse on the first model and was then sent
+        // again in full (~24k tokens) to a second one.
+        screening = await pinnedJson<ScreeningResult>(
           "You are a strict hiring screener for Claude Agent Skills. Judge each SKILL.md only by what it actually instructs, " +
             "against the job description. Do not reward popularity, general writing quality or broad 'productivity' skills.\n" +
             "Score the fit with these anchors:\n" +
@@ -199,8 +202,28 @@ export async function POST(request: Request) {
             "even when the task type (price comparison, quoting) is the same.",
           `JOB DESCRIPTION\njob_title: ${jobTitle}\nmission: ${mission}\nkpis: ${JSON.stringify(body.kpis ?? [])}\n\n` +
             `CANDIDATE SKILLS\n${dossier}\n\n` +
-            'Return {"results":[{"index":0,"fit_score":0-100,"fit_reason":"one line, concrete","gaps":"one line: what the job needs that this skill does not cover"}]} for every candidate.',
-          4000
+            "Submit one result for every candidate.",
+          4000,
+          {
+            type: "object",
+            properties: {
+              results: {
+                type: "array",
+                items: {
+                  type: "object",
+                  properties: {
+                    index: { type: "integer" },
+                    fit_score: { type: "integer", minimum: 0, maximum: 100 },
+                    fit_reason: { type: "string", description: "one line, concrete" },
+                    gaps: { type: "string", description: "one line: what the job needs that this skill does not cover" }
+                  },
+                  required: ["index", "fit_score", "fit_reason", "gaps"]
+                }
+              }
+            },
+            required: ["results"]
+          },
+          { model: process.env.APA_SKILLS_MODEL?.trim() || "claude-sonnet-5-5" }
         );
       } catch (error) {
         console.warn("[skills] screening failed:", error instanceof Error ? error.message : error);

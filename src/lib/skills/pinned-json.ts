@@ -3,7 +3,7 @@ import { createAnthropicClient } from "../anthropic-client";
 import { extractJsonObject } from "./claude-json";
 
 // One fixed judge model, no fallback chain: every output in a run must be judged by the same model.
-export const JUDGE_MODEL = process.env.APA_JUDGE_MODEL?.trim() || process.env.APA_SKILLS_MODEL?.trim() || "claude-sonnet-5";
+export const JUDGE_MODEL = process.env.APA_JUDGE_MODEL?.trim() || process.env.APA_SKILLS_MODEL?.trim() || "claude-sonnet-5-5";
 
 const ATTEMPTS = 3;
 

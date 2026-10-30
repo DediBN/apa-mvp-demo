@@ -17,6 +17,7 @@ type ConciergeRequest = {
   reference_data?: string;    // optional: catalog / price list / policy the data is checked against
   skill_md?: string;          // optional: SKILL.md of a sourced skill to run the action WITH (omit = no-skill baseline)
   skill_name?: string;
+  run_model?: "haiku" | "sonnet"; // A/B testing only: ?runModel=haiku|sonnet on /app; anything else is ignored
 };
 
 const MAX_SKILL_CHARS = 12000;
@@ -132,7 +133,7 @@ function salvageItems(text: string): { items: unknown[]; summary: string } | nul
 
 export async function POST(req: NextRequest) {
   try {
-    const { action_description, customer_data, reference_data, skill_md, skill_name } =
+    const { action_description, customer_data, reference_data, skill_md, skill_name, run_model } =
       (await req.json()) as ConciergeRequest;
 
     if (!action_description || !customer_data) {
@@ -150,7 +151,8 @@ export async function POST(req: NextRequest) {
     // Technology mode runs a demanding task framework (classified findings + a finished deliverable on a whole
     // sheet); the fast model declined or miscounted there in live tests, so the strong model is the default.
     // Set APA_RUN_MODEL (e.g. claude-haiku-5-5) to trade quality for cost.
-    const model = process.env.APA_RUN_MODEL?.trim() || process.env.APA_SKILLS_MODEL?.trim() || "claude-sonnet-5";
+    const override = run_model === "haiku" ? "claude-haiku-5-5" : run_model === "sonnet" ? "claude-sonnet-5-5" : null;
+    const model = override || process.env.APA_RUN_MODEL?.trim() || process.env.APA_SKILLS_MODEL?.trim() || "claude-sonnet-5-5";
     // Rate limits and overload are retried on the same model, with backoff, before the run counts as failed.
     let response: Awaited<ReturnType<typeof anthropic.messages.create>> | null = null;
     let lastError: unknown;
