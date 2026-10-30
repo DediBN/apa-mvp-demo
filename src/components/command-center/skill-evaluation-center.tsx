@@ -154,6 +154,8 @@ export function SkillEvaluationCenter({ status, ajd, candidates, onEvaluationDon
   const [judge, setJudge] = useState<JudgeResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [openKey, setOpenKey] = useState<string | null>(null);
+  // Which option's output is shown next to Claude alone in the result card (default: the best skill).
+  const [compareKey, setCompareKey] = useState<string | null>(null);
   const [repeats, setRepeats] = useState(1);
   const [unscoredRuns, setUnscoredRuns] = useState(0);
   const [contract, setContract] = useState<FormatRequirement[]>([]);
@@ -251,6 +253,7 @@ export function SkillEvaluationCenter({ status, ajd, candidates, onEvaluationDon
     setShareUrl(null);
     setShareCopied(false);
     setOpenKey(null);
+    setCompareKey(null);
     setLanes(plannedLanes);
 
     const actionDescription = buildActionDescription(ajd);
@@ -840,7 +843,10 @@ export function SkillEvaluationCenter({ status, ajd, candidates, onEvaluationDon
             const base = baselineScore;
             const total = judge.issues.length;
             const wrong = (sc?: OptionScore) => (sc ? sc.false_flags.length + sc.unsupported : 0);
+            const shownKey = compareKey && judge.scores.some((sc) => sc.key === compareKey) ? compareKey : best?.key;
+            const shownScore = judge.scores.find((sc) => sc.key === shownKey);
             const bestLane = best ? laneFor(best.key) : undefined;
+            const shownLane = shownKey ? laneFor(shownKey) : undefined;
             const baseLane = laneFor("skill_baseline_none");
             const headline = notDone
               ? "No option actually did the task — so nothing is recommended."
@@ -884,6 +890,52 @@ export function SkillEvaluationCenter({ status, ajd, candidates, onEvaluationDon
                       {tile("Missed", best.missed.length, base ? base.missed.length : "—", "low")}
                       {tile("Wrong or made up", wrong(best), base ? wrong(base) : "—", "low")}
                     </div>
+                    {/* Every option that competed, on one scale. Click a row to see its result below. */}
+                    <div className="mt-4 rounded-lg border border-command-border bg-command-bg/60 p-3">
+                      <p className="font-mono text-[10px] uppercase tracking-[0.14em] text-command-muted">
+                        All {ranked.length} options, same test · click one to see its result
+                      </p>
+                      <ol className="mt-2 space-y-1.5">
+                        {[...ranked]
+                          .sort((a, b) => b.found.length - a.found.length || wrong(a) - wrong(b))
+                          .map((sc, i) => {
+                            const ln = laneFor(sc.key);
+                            const kind = ln?.kind === "baseline" ? "Claude alone, no skill" : ln?.kind === "custom" ? "Built for this need" : `Library · ${ln?.candidate.source ?? ""}`;
+                            const isRec = sc.key === rec?.key && Boolean(winner);
+                            const weak = ln?.kind === "directory" && fitOf(sc.key) < MIN_FIT;
+                            const shown = (compareKey ?? best.key) === sc.key;
+                            const pct = total ? Math.round((sc.found.length / total) * 100) : 0;
+                            return (
+                              <li key={sc.key}>
+                                <button
+                                  type="button"
+                                  onClick={() => ln?.kind !== "baseline" && setCompareKey(sc.key)}
+                                  className={`grid w-full grid-cols-[1.5rem_minmax(0,1fr)_minmax(0,1.2fr)_auto] items-center gap-3 rounded px-2 py-1.5 text-start ${shown ? "bg-command-action/10" : "hover:bg-command-action/5"}`}
+                                >
+                                  <span className="font-mono text-xs text-command-muted">{i + 1}</span>
+                                  <span className="min-w-0">
+                                    <span className="block truncate text-sm font-semibold text-command-text">{sc.name.replace(/^Custom skill: |^Baseline: /, "")}</span>
+                                    <span className="block font-mono text-[10px] text-command-muted">
+                                      {kind}
+                                      {isRec ? <span className="ml-2 text-emerald-400">★ recommended</span> : null}
+                                      {weak ? <span className="ml-2 text-amber-400">weak fit · never recommended</span> : null}
+                                    </span>
+                                  </span>
+                                  <span className="flex items-center gap-2">
+                                    <span className="h-2 flex-1 overflow-hidden rounded bg-command-border/60">
+                                      <span className={`block h-full ${ln?.kind === "baseline" ? "bg-slate-400" : isRec ? "bg-emerald-400" : "bg-command-action"}`} style={{ width: `${pct}%` }} />
+                                    </span>
+                                  </span>
+                                  <span className="whitespace-nowrap font-mono text-xs text-command-text">
+                                    {sc.found.length}/{total} right
+                                    {wrong(sc) ? <span className="text-red-400"> · {wrong(sc)} wrong</span> : null}
+                                  </span>
+                                </button>
+                              </li>
+                            );
+                          })}
+                      </ol>
+                    </div>
                     <p className="mt-3 text-xs text-command-muted">
                       {total} checks,{" "}
                       {judge.ground_truth === "generated_scenarios"
@@ -893,10 +945,10 @@ export function SkillEvaluationCenter({ status, ajd, candidates, onEvaluationDon
                           : "from an independent audit of your data by the judge (indicative — add an answer key for exact scoring)"}
                       . Every option ran on the same model with the same request; one judge scored each result blind.
                     </p>
-                    {bestLane?.result?.deliverable || baseLane?.result?.deliverable ? (
+                    {(shownLane ?? bestLane)?.result?.deliverable || baseLane?.result?.deliverable ? (
                       <div className="mt-4 grid gap-3 md:grid-cols-2">
                         {[
-                          { title: `With the skill — ${best.name}`, lane: bestLane, accent: "text-emerald-400" },
+                          { title: `With the skill — ${shownScore?.name ?? best.name}`, lane: shownLane ?? bestLane, accent: "text-emerald-400" },
                           { title: "Claude alone, same request", lane: baseLane, accent: "text-command-muted" }
                         ].map(({ title, lane, accent }) => (
                           <div key={title} className="min-w-0">
@@ -1234,7 +1286,7 @@ export function SkillEvaluationCenter({ status, ajd, candidates, onEvaluationDon
                 <p className="mt-1 text-sm text-command-muted">
                   {recommendedScore && baselineScore
                     ? winnerBeatsBaseline
-                      ? `Correctness ${recommendedScore.correctness} vs ${baselineScore.correctness} for Claude with no skill — a clear gain on this test.`
+                      ? `${recommendedScore.found.length} of ${judge.issues.length} checks right, against ${baselineScore.found.length} for Claude with no skill — a clear gain on this test.`
                       : inNoise
                         ? `Correctness ${recommendedScore.correctness} vs ${baselineScore.correctness} for Claude with no skill — within run-to-run noise. ${recommendedLane.kind === "custom" ? "The skill's value here is applying your process the same way every time" : "Installing it is optional — it did not measurably improve the result"}${(recommendedScore.format ?? 0) - (baselineScore.format ?? 0) >= 10 ? ", though it followed your format better" : ""}.`
                         : `Correctness ${recommendedScore.correctness} vs ${baselineScore.correctness} for Claude with no skill. Claude alone did better on this test, so a skill is not needed for correctness${recommendedLane.kind === "custom" ? "; install it only if you want your process written down and applied the same way every time" : ""}.`
