@@ -378,9 +378,10 @@ export function SkillEvaluationCenter({ status, ajd, candidates, onEvaluationDon
             const body = {
               action_description: requestMode === "everyday" ? everydayRequest : actionDescription,
               customer_data: set.customer.slice(0, MAX_CHARS),
-              // Everyday test on generated scenarios: only the customer's request, as it arrives. The business's own
-              // prices and rules are not handed over — knowing them is the skill's job. (Your own uploaded reference is kept.)
-              reference_data: requestMode === "everyday" && mode === "scenarios" ? "" : set.reference.slice(0, MAX_CHARS),
+              // The reference (catalog, price list) goes to every option, the way an employee attaches it. Withholding it
+              // made catalog tasks impossible for everyone (the judge saw a catalog the runs never got). What the skill
+              // must supply is the business's rules and process — the everyday request does not repeat them.
+              reference_data: set.reference.slice(0, MAX_CHARS),
               skill_md: skillByLane.get(lane.candidate.candidate_id),
               skill_name: lane.kind === "baseline" ? undefined : lane.candidate.name
             };
@@ -785,8 +786,8 @@ export function SkillEvaluationCenter({ status, ajd, candidates, onEvaluationDon
                 <label className="flex items-start gap-2">
                   <input type="radio" className="mt-1" checked={requestMode === "everyday"} onChange={() => setRequestMode("everyday")} />
                   <span>
-                    The everyday request (realistic) — the task and the customer&apos;s message, the way an employee asks. Your prices and rules
-                    must come from the skill.
+                    The everyday request (realistic) — the task, the customer&apos;s message and the attached reference (catalog, price list), the
+                    way an employee asks. Your rules and process must come from the skill.
                   </span>
                 </label>
                 <label className="flex items-start gap-2">
@@ -1049,7 +1050,7 @@ export function SkillEvaluationCenter({ status, ajd, candidates, onEvaluationDon
             <p className="mt-1 font-mono text-[11px] text-command-muted">
               Asked: {ranWith === "everyday"
                 ? mode === "scenarios"
-                  ? "the everyday request and the customer's message only — your prices and rules were not handed to any option; a skill had to supply them"
+                  ? "the everyday request, the customer's message and the reference data — your rules were not repeated to any option; a skill had to supply them"
                   : "the everyday request and your data — your rules were not repeated to any option; a skill had to supply them"
                 : "your full Skill Spec on every run — shows what Claude can do when you spell everything out each time"}
             </p>
