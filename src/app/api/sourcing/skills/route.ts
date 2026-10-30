@@ -40,8 +40,10 @@ interface ScreeningResult {
 }
 
 const MAX_TO_FETCH = 24;
-const MAX_SHORTLIST = 4; // directory skills tested; + custom skill + no-skill baseline
-const MIN_SKILLS = 3; // always test at least this many directory skills when that many are readable
+// Directory skills tested (+ custom skill + no-skill baseline). Two keeps a run to a few minutes; more rarely changes
+// the answer, since most extra matches score as weak fit.
+const MAX_SHORTLIST = 2;
+const MIN_SKILLS = 2; // always test at least this many directory skills when that many are readable
 const SKILL_EXCERPT_CHARS = 2500;
 const SKILL_CARRY_CHARS = 20000;
 

@@ -830,6 +830,85 @@ export function SkillEvaluationCenter({ status, ajd, candidates, onEvaluationDon
 
       {stage === "done" && judge && (
         <div className="space-y-4">
+          {/* The answer first: one sentence, three numbers, and the two results side by side. Everything else is under
+              "Technical details" for whoever wants the method. */}
+          {(() => {
+            const best = winner;
+            const base = baselineScore;
+            const total = judge.issues.length;
+            const wrong = (sc?: OptionScore) => (sc ? sc.false_flags.length + sc.unsupported : 0);
+            const bestLane = best ? laneFor(best.key) : undefined;
+            const baseLane = laneFor("skill_baseline_none");
+            const headline = notDone
+              ? "No option actually did the task — so nothing is recommended."
+              : !best
+                ? "No skill could be compared on this run."
+                : winnerBeatsBaseline
+                  ? `With the skill: ${best.found.length} of ${total} checks right. Claude alone: ${base ? base.found.length : "—"} of ${total}.`
+                  : inNoise
+                    ? `No clear difference: ${best.found.length} of ${total} with the skill, ${base ? base.found.length : "—"} of ${total} without.`
+                    : `Claude alone did better on this test: ${base ? base.found.length : "—"} of ${total}, against ${best.found.length} of ${total} with the best skill.`;
+            const tone = winnerBeatsBaseline ? "border-emerald-400/50 bg-emerald-400/5" : "border-amber-400/50 bg-amber-400/5";
+            const tile = (label: string, a: string | number, b: string | number, good: "high" | "low") => {
+              const na = Number(a);
+              const nb = Number(b);
+              const better = Number.isFinite(na) && Number.isFinite(nb) && (good === "high" ? na > nb : na < nb);
+              return (
+                <div className="rounded-lg border border-command-border bg-command-bg/60 p-3">
+                  <p className="font-mono text-[10px] uppercase tracking-[0.14em] text-command-muted">{label}</p>
+                  <p className="mt-1 text-3xl font-semibold text-command-text">
+                    <span className={better ? "text-emerald-400" : ""}>{a}</span>
+                    <span className="ml-2 text-base font-normal text-command-muted">vs {b} without a skill</span>
+                  </p>
+                </div>
+              );
+            };
+            return (
+              <div className={`rounded-xl border p-5 ${tone}`}>
+                <p className="font-mono text-[11px] uppercase tracking-[0.18em] text-command-muted">Result</p>
+                <p className="mt-1 text-xl font-semibold text-command-text md:text-2xl">{headline}</p>
+                {best && !notDone ? (
+                  <>
+                    <p className="mt-1 text-sm text-command-muted">
+                      {winnerBeatsBaseline ? "Recommended" : "Best skill"}: <span className="font-semibold text-command-text">{best.name}</span>
+                      {bestLane?.kind === "custom" ? " — written for this need" : bestLane?.kind === "directory" ? ` — from ${bestLane.candidate.source}` : ""}.
+                    </p>
+                    <div className="mt-4 grid gap-3 md:grid-cols-3">
+                      {tile("Checks right", best.found.length, base ? base.found.length : "—", "high")}
+                      {tile("Missed", best.missed.length, base ? base.missed.length : "—", "low")}
+                      {tile("Wrong or made up", wrong(best), base ? wrong(base) : "—", "low")}
+                    </div>
+                    <p className="mt-3 text-xs text-command-muted">
+                      {total} checks with known answers, on{" "}
+                      {judge.ground_truth === "generated_scenarios" ? `${scenarios.length} generated test cases` : "your data"}. Every option ran on the
+                      same model with the same request; one judge scored each result blind.
+                    </p>
+                    {bestLane?.result?.deliverable || baseLane?.result?.deliverable ? (
+                      <div className="mt-4 grid gap-3 md:grid-cols-2">
+                        {[
+                          { title: `With the skill — ${best.name}`, lane: bestLane, accent: "text-emerald-400" },
+                          { title: "Claude alone, same request", lane: baseLane, accent: "text-command-muted" }
+                        ].map(({ title, lane, accent }) => (
+                          <div key={title} className="min-w-0">
+                            <p className={`font-mono text-[11px] uppercase tracking-[0.14em] ${accent}`}>{title}</p>
+                            <div dir="auto" className="mt-2 max-h-80 overflow-auto rounded border border-command-border bg-command-bg/60 p-3 font-sans text-sm text-command-text">
+                              {lane?.result?.deliverable ? <Markdown text={lane.result.deliverable} /> : <p className="text-command-muted">{lane?.result?.summary || "No finished result."}</p>}
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    ) : null}
+                  </>
+                ) : null}
+              </div>
+            );
+          })()}
+
+          <details className="command-card p-3">
+            <summary className="cursor-pointer font-mono text-[11px] uppercase tracking-[0.14em] text-command-muted">
+              Technical details — scores, test cases, method, every option
+            </summary>
+            <div className="mt-3 space-y-4">
           <div className={`rounded-lg border p-4 ${winnerBeatsBaseline ? "border-emerald-400/40 bg-emerald-400/5" : "border-amber-400/40 bg-amber-400/5"}`}>
             {winner && winnerBeatsBaseline ? (
               <p className="text-sm text-command-text">
@@ -1119,6 +1198,9 @@ export function SkillEvaluationCenter({ status, ajd, candidates, onEvaluationDon
               </div>
             );
           })()}
+
+            </div>
+          </details>
 
           <div className="flex justify-end">
             <button
