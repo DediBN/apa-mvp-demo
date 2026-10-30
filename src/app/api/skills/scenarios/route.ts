@@ -54,7 +54,9 @@ export async function POST(request: Request) {
     // Structured answer (forced tool call): sample data full of Hebrew quotes (מ"ל, ש"ח) cannot break parsing.
     const result = await pinnedJson<{ scenarios: GeneratedScenario[] }>(
       SYSTEM,
-      `job_title: ${body.job_title ?? ""}\nbusiness_need: ${body.business_need ?? ""}\nmission: ${body.mission ?? ""}\n` +
+      // The model does not know today's date; without it, test data carries dates from its training years.
+      `Today's date: ${new Date().toISOString().slice(0, 10)}. Dates in the test data are around today, never years back.\n\n` +
+        `job_title: ${body.job_title ?? ""}\nbusiness_need: ${body.business_need ?? ""}\nmission: ${body.mission ?? ""}\n` +
         `kpis: ${JSON.stringify(body.kpis ?? [])}\n\n` +
         (body.variant === "hard"
           ? "Make this a HARD scenario: messier formatting, more records, subtler issues, and two false-alarm traps.\n"
