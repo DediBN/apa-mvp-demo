@@ -100,6 +100,9 @@ export interface SkillScanMeta {
   found?: { skillsmp: number; skills_sh: number; unique: number };
   readable_skill_md?: number;
   sources_enabled?: { skillsmp: boolean; skills_sh: boolean };
+  screened?: number;
+  min_fit?: number;
+  closest?: { name: string; directory: string; fit_score: number; reason: string; gap: string }[];
 }
 
 export async function runSkillSourcingScan(input: Pick<ScanInput, "jobTitle" | "mission" | "kpis">): Promise<{ candidates: Candidate[]; meta: SkillScanMeta }> {

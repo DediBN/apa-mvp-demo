@@ -4,7 +4,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { APAStatus } from "../../lib/state-machine";
 import { AJD } from "../../lib/intake-agent/mock";
 import { Candidate } from "../../lib/research-agent/mock";
-import { runSkillSourcingScan } from "../../lib/research-agent/client";
+import { runSkillSourcingScan, SkillScanMeta } from "../../lib/research-agent/client";
 import { securityWarning } from "../../lib/skills/security";
 import { StatusPill } from "../ui/status-pill";
 import { MIN_FIT } from "../../lib/business/scoring";
@@ -69,6 +69,8 @@ export function SourcingRadar({ status, ajd, onShortlistReady, onFail, addLog }:
   const [isScanning, setIsScanning] = useState(false);
   const [shortlist, setShortlist] = useState<Candidate[]>([]);
   const [visibleCount, setVisibleCount] = useState(0);
+  // What the scan did, kept on screen after it ends: how many skills were found and read, and the closest ones.
+  const [summary, setSummary] = useState<{ meta: SkillScanMeta; libraryCount: number } | { failed: string } | null>(null);
   const hasTransitionedRef = useRef(false);
   const hasRequestedRef = useRef(false);
   const replaceDeadlineRef = useRef<number | null>(null);
@@ -90,6 +92,7 @@ export function SourcingRadar({ status, ajd, onShortlistReady, onFail, addLog }:
       setShortlist([]);
       setVisibleCount(0);
       setIsScanning(false);
+      setSummary(null);
     }
   }, [status.state]);
 
@@ -137,6 +140,10 @@ export function SourcingRadar({ status, ajd, onShortlistReady, onFail, addLog }:
           if (meta.sources_enabled && (!meta.sources_enabled.skillsmp || !meta.sources_enabled.skills_sh)) {
             addLog(`Source keys — SkillsMP: ${meta.sources_enabled.skillsmp ? "on" : "missing"}, skills.sh: ${meta.sources_enabled.skills_sh ? "on" : "missing"}`);
           }
+          if (!isStale()) {
+            const libraryCount = candidates.filter((c) => c.candidate_id !== "skill_custom_ajd" && c.candidate_id !== "skill_baseline_none").length;
+            setSummary({ meta, libraryCount });
+          }
           return candidates;
         });
       })(),
@@ -174,6 +181,7 @@ export function SourcingRadar({ status, ajd, onShortlistReady, onFail, addLog }:
         }
 
         const reason = error instanceof Error ? error.message : "Sourcing scan failed";
+        setSummary({ failed: reason });
         addLog(`⚠ Directory scan failed (${reason}). Continuing with the custom skill and Claude with no skill only.`);
       })
       .finally(() => {
@@ -257,15 +265,29 @@ export function SourcingRadar({ status, ajd, onShortlistReady, onFail, addLog }:
             <div className="absolute inset-0 rounded-full bg-[radial-gradient(circle_at_center,rgba(100,255,218,0.12),transparent_65%)]" />
           </div>
 
-          <p className="mt-3 font-mono text-xs text-command-muted">
-            {status.state === "RESEARCH"
-              ? isScanning
-                ? "Scanning skill directories..."
-                : shortlist.length > 0
-                  ? "Scan complete"
-                  : "Awaiting research trigger"
-              : "Sourcing starts automatically in RESEARCH"}
-          </p>
+          {isScanning ? (
+            <p className="mt-3 font-mono text-xs text-command-muted">Scanning skill directories...</p>
+          ) : summary && "failed" in summary ? (
+            <p className="mt-3 font-mono text-xs text-command-warning">
+              Directory scan failed ({summary.failed}). Testing the skill built for this need against Claude alone.
+            </p>
+          ) : summary ? (
+            <div className="mt-3 space-y-1 font-mono text-xs text-command-muted">
+              <p className="text-command-text">Scan complete</p>
+              <p>
+                Found {summary.meta.found?.unique ?? 0} skills · read {summary.meta.screened ?? summary.meta.readable_skill_md ?? 0}
+              </p>
+              <p className={summary.libraryCount > 0 ? "text-command-pass" : "text-command-warning"}>
+                {summary.libraryCount > 0
+                  ? `${summary.libraryCount} fit well enough to test (score ${summary.meta.min_fit ?? MIN_FIT}+)`
+                  : `None fit well enough (needs ${summary.meta.min_fit ?? MIN_FIT}+)`}
+              </p>
+            </div>
+          ) : (
+            <p className="mt-3 font-mono text-xs text-command-muted">
+              {status.state === "RESEARCH" ? "Awaiting research trigger" : "Sourcing starts automatically in RESEARCH"}
+            </p>
+          )}
         </div>
 
         <div className="command-card p-4 lg:col-span-4">
@@ -312,6 +334,34 @@ export function SourcingRadar({ status, ajd, onShortlistReady, onFail, addLog }:
               ))
             )}
           </div>
+
+          {summary && !("failed" in summary) && !isScanning
+            ? (() => {
+                const minFit = summary.meta.min_fit ?? MIN_FIT;
+                const rejected = (summary.meta.closest ?? []).filter((c) => c.fit_score < minFit);
+                if (rejected.length === 0) return null;
+                return (
+                  <div className="mt-4 rounded-lg border border-dashed border-command-border p-3">
+                    <p className="font-mono text-[10px] uppercase tracking-[0.16em] text-command-muted">
+                      Closest in the directories · below {minFit}, not tested
+                    </p>
+                    <ul className="mt-2 space-y-2">
+                      {rejected.map((c) => (
+                        <li key={`${c.directory}-${c.name}`} className="text-xs">
+                          <div className="flex items-center justify-between gap-2">
+                            <span className="font-semibold text-command-text">{c.name}</span>
+                            <span className="shrink-0 rounded-full border border-command-warning/50 px-2 py-0.5 font-mono text-[10px] text-command-warning">
+                              fit {c.fit_score}
+                            </span>
+                          </div>
+                          {c.gap ? <p className="mt-0.5 text-command-muted">Missing: {c.gap}</p> : c.reason ? <p className="mt-0.5 text-command-muted">{c.reason}</p> : null}
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                );
+              })()
+            : null}
         </div>
       </div>
     </section>

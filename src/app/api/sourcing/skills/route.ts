@@ -172,6 +172,8 @@ export async function POST(request: Request) {
     const withContent = withContentRaw.filter((entry) => kept.has(entry));
 
     let candidates: Candidate[] = [];
+    // The best-scoring skills, passing or not, so the screen can say what was closest and why it fell short.
+    let closest: { name: string; directory: string; fit_score: number; reason: string; gap: string }[] = [];
 
     // 4. Screen with Claude against the AJD
     if (withContent.length > 0) {
@@ -236,6 +238,13 @@ export async function POST(request: Request) {
         })
         .filter(({ verdict }) => Boolean(verdict))
         .sort((a, b) => (b.verdict?.fit_score ?? 0) - (a.verdict?.fit_score ?? 0));
+      closest = scored.slice(0, 3).map(({ entry, verdict }) => ({
+        name: entry.hit.name,
+        directory: entry.hit.directory,
+        fit_score: Math.max(0, Math.min(100, Math.round(verdict?.fit_score ?? 0))),
+        reason: verdict?.fit_reason ?? "",
+        gap: verdict?.gaps ?? ""
+      }));
       const passing = scored.filter(({ verdict }) => (verdict?.fit_score ?? 0) >= MIN_FIT).slice(0, MAX_SHORTLIST);
       // Only library skills that can actually be recommended are tested. Weak matches (a map tool for a car-seat
       // advisor) can never win, so running them only cost time and crowded the results. With none, the comparison is
@@ -285,6 +294,9 @@ export async function POST(request: Request) {
       queries: plan,
       found: { skillsmp: mpSemantic.length + mpKeyword.length, skills_sh: shHits.length, unique: allHits.length },
       readable_skill_md: withContent.length,
+      screened: withContent.length,
+      min_fit: MIN_FIT,
+      closest,
       sources_enabled: {
         skillsmp: true, // works anonymously; a key only raises the quota
         skills_sh: Boolean(process.env.SKILLS_SH_API_KEY?.trim() || oidcHeader || process.env.VERCEL_OIDC_TOKEN?.trim())
