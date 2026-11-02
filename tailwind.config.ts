@@ -54,6 +54,11 @@ const config: Config = {
         slideUp: {
           "0%": { opacity: "0", transform: "translateY(12px)" },
           "100%": { opacity: "1", transform: "translateY(0)" }
+        },
+        // Indeterminate "working" bar: shows activity without pretending to know how far along a step is.
+        workBar: {
+          "0%": { transform: "translateX(-100%)" },
+          "100%": { transform: "translateX(250%)" }
         }
       },
       animation: {
@@ -61,7 +66,8 @@ const config: Config = {
         radarSweep: "radarSweep 2.4s linear infinite",
         fadeUp: "fadeUp 0.45s ease-out",
         fadeIn: "fadeIn 0.35s ease-out",
-        slideUp: "slideUp 0.4s ease-out"
+        slideUp: "slideUp 0.4s ease-out",
+        workBar: "workBar 1.4s ease-in-out infinite"
       }
     }
   },
