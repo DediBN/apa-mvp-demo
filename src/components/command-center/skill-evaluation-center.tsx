@@ -51,6 +51,15 @@ type RunResult = { items: ResultItem[]; summary: string; deliverable?: string };
 
 type LaneState = "queued" | "authoring" | "running" | "done" | "error";
 
+interface LiveState {
+  sets: Array<{ id: string; label: string }>;
+  runs: Record<string, { done: number; total: number }>; // per option: runs finished / planned
+  judged: Record<string, string[]>; // per option: test sets whose first run has been judged
+  found: Record<string, string[]>; // per option: check ids it got right (first run)
+  checks: Array<{ id: string; setId: string; description: string; kind: "correctness" | "format" }>;
+  ticker: string;
+}
+
 interface Lane {
   candidate: Candidate;
   kind: "directory" | "custom" | "baseline";
@@ -97,6 +106,10 @@ function buildEverydayRequest(ajd: AJD): string {
     "Handle the request in the data below and produce the finished result, ready to send.",
     "Write it in the language of the data."
   ].join("\n");
+}
+
+function customLaneFor(lanes: Lane[]): boolean {
+  return lanes.some((l) => l.kind === "custom");
 }
 
 function runModelParam(): "haiku" | "sonnet" | undefined {
@@ -165,6 +178,8 @@ export function SkillEvaluationCenter({ status, ajd, candidates, onEvaluationDon
   const [openKey, setOpenKey] = useState<string | null>(null);
   // Which option's output is shown next to Claude alone in the result card (default: the best skill).
   const [compareKey, setCompareKey] = useState<string | null>(null);
+  // Live view while the test runs: only real events (a run finished, a judgement came back), never simulated progress.
+  const [live, setLive] = useState<LiveState | null>(null);
   const [repeats, setRepeats] = useState(1);
   const [unscoredRuns, setUnscoredRuns] = useState(0);
   const [contract, setContract] = useState<FormatRequirement[]>([]);
@@ -324,6 +339,17 @@ export function SkillEvaluationCenter({ status, ajd, candidates, onEvaluationDon
 
     setStage("running");
     addLog(`Skill evaluation: ${plannedLanes.length} options × ${sets.length} test set${sets.length === 1 ? "" : "s"}.`);
+    const multiSets = sets.length > 1;
+    const pfx = (setId: string, id: string) => (multiSets ? `${setId}·${id}` : id);
+    const tick = (ticker: string) => setLive((prev) => (prev ? { ...prev, ticker } : prev));
+    setLive({
+      sets: sets.map((st) => ({ id: st.id, label: st.label })),
+      runs: Object.fromEntries(plannedLanes.map((l) => [l.candidate.candidate_id, { done: 0, total: sets.length * repeats }])),
+      judged: {},
+      found: {},
+      checks: [],
+      ticker: customLaneFor(plannedLanes) ? "Writing a skill for this need from the Skill Spec…" : "Starting the runs…"
+    });
 
     // 2. Author the custom skill once, before any run.
     const skillByLane = new Map<string, string | undefined>();
@@ -339,6 +365,7 @@ export function SkillEvaluationCenter({ status, ajd, candidates, onEvaluationDon
         skillByLane.set(id, authored.skill_md);
         updateLane(id, { skillMd: authored.skill_md, state: "queued" });
         addLog(`Custom skill written from the Skill Spec: ${authored.name}`);
+        tick(`Skill written: ${authored.name}. Every option now runs the same test.`);
       } catch (e) {
         updateLane(id, { state: "error", error: e instanceof Error ? e.message : "Authoring failed" });
       }
@@ -371,6 +398,18 @@ export function SkillEvaluationCenter({ status, ajd, candidates, onEvaluationDon
                   : fmt.map((f) => ({ id: f.id, description: f.description, kind: "format" as const, check: f.check })))
               ]
             : r.issues;
+          setLive((prev) =>
+            prev
+              ? {
+                  ...prev,
+                  checks: [
+                    ...prev.checks,
+                    ...issues.map((i) => ({ id: pfx(set.id, i.id), setId: set.id, description: i.description, kind: i.kind }))
+                  ],
+                  ticker: `Checks ready for ${multiSets ? `test ${set.id}` : "your data"}: ${issues.length} things a correct result must get right.`
+                }
+              : prev
+          );
           return { setId: set.id, issues };
         })
       )
@@ -398,9 +437,21 @@ export function SkillEvaluationCenter({ status, ajd, candidates, onEvaluationDon
             };
             // One retry: a single transient failure should not knock a run out of the comparison.
             let lastError = "Run failed";
+            const shortName = lane.kind === "baseline" ? "Claude alone" : lane.candidate.name.replace(/^Custom skill: /, "");
+            tick(`${shortName} is working on ${multiSets ? `test ${set.id}` : "your data"}…`);
             for (let attempt = 0; attempt < 2; attempt += 1) {
               try {
                 const result = await postJson<RunResult>("/api/concierge-demo", body);
+                const laneId = lane.candidate.candidate_id;
+                setLive((prev) =>
+                  prev
+                    ? {
+                        ...prev,
+                        runs: { ...prev.runs, [laneId]: { ...prev.runs[laneId], done: (prev.runs[laneId]?.done ?? 0) + 1 } },
+                        ticker: `${shortName} finished ${multiSets ? `test ${set.id}` : "the run"}${result.deliverable ? " and produced a result" : ""}.`
+                      }
+                    : prev
+                );
                 return { laneId: lane.candidate.candidate_id, setId: set.id, rep, result };
               } catch (e) {
                 lastError = e instanceof Error ? e.message : "Run failed";
@@ -446,6 +497,7 @@ export function SkillEvaluationCenter({ status, ajd, candidates, onEvaluationDon
     // 5. Judge every run on its own, blind, against its set's fixed ground truth; then aggregate per option.
     setStage("judging");
     addLog(`All runs finished. Scoring each of ${runs.filter((r) => r.result).length} runs blind against a fixed ground truth.`);
+    tick("All runs finished. The judge now checks each result on its own, blind to which option wrote it.");
     try {
       const settledTruths = await truthP;
       const truths = settledTruths.flatMap((t) => (t.status === "fulfilled" ? [t.value] : []));
@@ -468,6 +520,19 @@ export function SkillEvaluationCenter({ status, ajd, candidates, onEvaluationDon
             for (let attempt = 0; attempt < 2; attempt += 1) {
               try {
                 const j = await postJson<RunJudgement & { verdict: string; did_task?: boolean }>("/api/skills/judge-one", body);
+                if (r.rep === 0) {
+                  const name = laneFor(r.laneId)?.kind === "baseline" ? "Claude alone" : (laneFor(r.laneId)?.candidate.name ?? "").replace(/^Custom skill: /, "");
+                  setLive((prev) =>
+                    prev
+                      ? {
+                          ...prev,
+                          judged: { ...prev.judged, [r.laneId]: [...(prev.judged[r.laneId] ?? []), r.setId] },
+                          found: { ...prev.found, [r.laneId]: [...(prev.found[r.laneId] ?? []), ...j.found.map((f) => pfx(r.setId, f))] },
+                          ticker: `Judge scored ${name}${multiSets ? ` on test ${r.setId}` : ""}: ${j.found.length} of ${(truthBySet.get(r.setId) ?? []).length} checks right.`
+                        }
+                      : prev
+                  );
+                }
                 return { ...r, judgement: j };
               } catch {
                 if (attempt === 0) await new Promise((res) => setTimeout(res, 2000));
@@ -834,23 +899,124 @@ export function SkillEvaluationCenter({ status, ajd, candidates, onEvaluationDon
       )}
 
       {(stage === "running" || stage === "judging") && (
-        <div className="grid gap-3 md:grid-cols-2">
-          {lanes.map((lane) => (
-            <div key={lane.candidate.candidate_id} className="command-card flex items-center justify-between gap-3 p-3">
-              <div>
-                <p className="text-sm font-semibold text-command-text">{lane.candidate.name}</p>
-                <p className="font-mono text-[10px] uppercase tracking-[0.14em] text-command-muted">{lane.kind === "baseline" ? "No skill" : lane.candidate.source}</p>
+        <div className="space-y-4" aria-live="polite">
+          {/* Live ticker: the last real event */}
+          <div className="flex items-center gap-3 rounded-lg border border-command-action/40 bg-command-action/5 px-4 py-3">
+            <span className="relative flex h-2.5 w-2.5 flex-none">
+              <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-command-action opacity-60 motion-reduce:animate-none" />
+              <span className="relative inline-flex h-2.5 w-2.5 rounded-full bg-command-action" />
+            </span>
+            <p className="min-w-0 truncate font-mono text-xs text-command-text" dir="auto">
+              {live?.ticker || (stage === "judging" ? "Scoring all outputs against one ground truth…" : "Running…")}
+            </p>
+          </div>
+
+          {/* One lane per option: skill → run → judge, lit by real events */}
+          <div className="grid gap-3 md:grid-cols-2">
+            {lanes.map((lane) => {
+              const id = lane.candidate.candidate_id;
+              const r = live?.runs[id];
+              const judgedSets = live?.judged[id]?.length ?? 0;
+              const setCount = live?.sets.length ?? 1;
+              const steps: Array<{ label: string; state: "todo" | "now" | "done" | "fail" }> = [
+                ...(lane.kind === "custom"
+                  ? [{ label: "Write skill", state: lane.state === "authoring" ? ("now" as const) : lane.state === "error" && !lane.skillMd ? ("fail" as const) : ("done" as const) }]
+                  : []),
+                {
+                  label: r ? `Run ${r.done}/${r.total}` : "Run",
+                  state: lane.state === "error" ? "fail" : r && r.done >= r.total ? "done" : lane.state === "running" ? "now" : lane.state === "done" ? "done" : "todo"
+                },
+                {
+                  label: `Judge ${judgedSets}/${setCount}`,
+                  state: judgedSets >= setCount ? "done" : stage === "judging" && lane.state !== "error" ? "now" : "todo"
+                }
+              ];
+              const tone = (st: string) =>
+                st === "done"
+                  ? "border-emerald-400/50 bg-emerald-400/10 text-emerald-300"
+                  : st === "now"
+                    ? "border-command-action bg-command-action/15 text-command-action animate-pulse motion-reduce:animate-none"
+                    : st === "fail"
+                      ? "border-red-400/50 bg-red-400/10 text-red-300"
+                      : "border-command-border text-command-muted";
+              return (
+                <div key={id} className="command-card p-3">
+                  <div className="flex items-center justify-between gap-3">
+                    <div className="min-w-0">
+                      <p className="truncate text-sm font-semibold text-command-text" dir="auto">
+                        {lane.kind === "baseline" ? "Claude with no skill" : lane.candidate.name.replace(/^Custom skill: /, "")}
+                      </p>
+                      <p className="font-mono text-[10px] uppercase tracking-[0.14em] text-command-muted">
+                        {lane.kind === "baseline" ? "No skill · the yardstick" : lane.kind === "custom" ? "Built for this need" : `Library · ${lane.candidate.source}`}
+                      </p>
+                    </div>
+                    {lane.state === "error" ? <span className="font-mono text-[10px] text-red-400">{lane.error}</span> : null}
+                  </div>
+                  <div className="mt-3 flex flex-wrap items-center gap-1.5">
+                    {steps.map((st, i) => (
+                      <span key={st.label} className="flex items-center gap-1.5">
+                        <span className={`rounded border px-2 py-0.5 font-mono text-[10px] transition-colors duration-500 ${tone(st.state)}`}>
+                          {st.state === "done" ? "✓ " : ""}
+                          {st.label}
+                        </span>
+                        {i < steps.length - 1 ? <span className="text-command-muted">→</span> : null}
+                      </span>
+                    ))}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+
+          {/* The checks: they appear when the answer key is set, then flip to ✓ / ✗ per option as the judge scores */}
+          {live && live.checks.length > 0 ? (
+            <div className="command-card p-3">
+              <p className="font-mono text-[10px] uppercase tracking-[0.14em] text-command-muted">
+                What a correct result must get right · {live.checks.length} checks
+              </p>
+              <div className="mt-2 max-h-80 overflow-auto">
+                <table className="w-full border-collapse text-xs">
+                  <thead>
+                    <tr className="text-command-muted">
+                      <th className="py-1 pr-2 text-start font-normal">Check</th>
+                      {lanes.map((lane) => (
+                        <th key={lane.candidate.candidate_id} className="w-16 py-1 text-center font-normal" title={lane.candidate.name}>
+                          {lane.kind === "baseline" ? "No skill" : lane.kind === "custom" ? "Built" : "Library"}
+                        </th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {live.checks.map((c) => (
+                      <tr key={c.id} className="border-t border-command-border/50">
+                        <td className="py-1 pr-2 text-command-text" dir="auto">
+                          <span className="line-clamp-1">
+                            {live.sets.length > 1 ? <span className="mr-1 font-mono text-command-muted">{c.setId}</span> : null}
+                            {c.kind === "format" ? <span className="mr-1 font-mono text-[10px] text-command-muted">format</span> : null}
+                            {c.description}
+                          </span>
+                        </td>
+                        {lanes.map((lane) => {
+                          const id = lane.candidate.candidate_id;
+                          const judged = live.judged[id]?.includes(c.setId);
+                          const ok = live.found[id]?.includes(c.id);
+                          return (
+                            <td key={id} className="py-1 text-center">
+                              {judged ? (
+                                <span className={`inline-block animate-fadeUp font-semibold ${ok ? "text-emerald-400" : "text-red-400"}`}>{ok ? "✓" : "✗"}</span>
+                              ) : (
+                                <span className="inline-block h-1.5 w-1.5 animate-pulse rounded-full bg-command-border motion-reduce:animate-none" />
+                              )}
+                            </td>
+                          );
+                        })}
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
               </div>
-              <span
-                className={`font-mono text-xs ${
-                  lane.state === "done" ? "text-emerald-400" : lane.state === "error" ? "text-red-400" : "text-command-action"
-                }`}
-              >
-                {lane.state === "authoring" ? "writing skill…" : lane.state === "running" ? "running…" : lane.state === "error" ? lane.error : lane.state}
-              </span>
             </div>
-          ))}
-          {stage === "judging" && <p className="font-mono text-xs text-command-action md:col-span-2">Scoring all outputs against one ground truth…</p>}
+          ) : null}
         </div>
       )}
 
