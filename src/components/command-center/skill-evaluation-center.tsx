@@ -185,10 +185,13 @@ export function SkillEvaluationCenter({ status, ajd, candidates, onEvaluationDon
   // A one-second clock while the test runs, so long steps show elapsed time instead of looking stuck.
   const [now, setNow] = useState(() => Date.now());
   useEffect(() => {
-    if (stage !== "running" && stage !== "judging") return;
+    if (stage !== "running" && stage !== "judging" && stage !== "generating") return;
     const t = window.setInterval(() => setNow(Date.now()), 1000);
     return () => window.clearInterval(t);
   }, [stage]);
+  // Progress while the tests are being written (before any option runs): each piece lights up when it really returns.
+  type GenState = "now" | "done" | "fail";
+  const [gen, setGen] = useState<{ since: number; ticker: string; contract: GenState; standard: GenState; hard: GenState } | null>(null);
   const [repeats, setRepeats] = useState(1);
   const [unscoredRuns, setUnscoredRuns] = useState(0);
   const [contract, setContract] = useState<FormatRequirement[]>([]);
@@ -303,7 +306,12 @@ export function SkillEvaluationCenter({ status, ajd, candidates, onEvaluationDon
     const fetchContract = () => postJson<{ requirements: FormatRequirement[] }>("/api/skills/format-contract", ajdBody).then((r) => r.requirements);
     const contractP = fetchContract()
       .catch(fetchContract)
+      .then((reqs) => {
+        setGen((g) => (g ? { ...g, contract: "done", ticker: `Output format fixed: ${reqs.length} requirements every option must meet.`, since: Date.now() } : g));
+        return reqs;
+      })
       .catch(() => {
+        setGen((g) => (g ? { ...g, contract: "fail" } : g));
         addLog("Could not set the required output format — format is scored on the test sets' own items this time.");
         return [] as FormatRequirement[];
       });
@@ -313,13 +321,25 @@ export function SkillEvaluationCenter({ status, ajd, candidates, onEvaluationDon
     if (mode === "data") {
       sets = [{ id: "D", label: "Your data", customer: customerData, reference: referenceData, answerKey: answerKey.trim() || undefined }];
     } else {
+      setGen({ since: Date.now(), ticker: "Writing two test sets from the Skill Spec — realistic sample data with known answers…", contract: "now", standard: "now", hard: "now" });
       setStage("generating");
       addLog("Generating test scenarios from the Skill Spec (no real data provided).");
       try {
         // Two independent calls in parallel (standard + hard) keep each request well inside the function time limit.
         const settled = await Promise.allSettled(
           (["standard", "hard"] as const).map((variant) =>
-            postJson<{ scenarios: GeneratedScenario[] }>("/api/skills/scenarios", { ...ajdBody, count: 1, variant })
+            postJson<{ scenarios: GeneratedScenario[] }>("/api/skills/scenarios", { ...ajdBody, count: 1, variant }).then(
+              (r) => {
+                setGen((g) =>
+                  g ? { ...g, [variant]: "done", since: Date.now(), ticker: `${variant === "standard" ? "Standard" : "Hard"} test set ready: ${r.scenarios[0]?.title ?? "sample data with known answers"}.` } : g
+                );
+                return r;
+              },
+              (err) => {
+                setGen((g) => (g ? { ...g, [variant]: "fail" } : g));
+                throw err;
+              }
+            )
           )
         );
         const generated = {
@@ -965,7 +985,59 @@ export function SkillEvaluationCenter({ status, ajd, candidates, onEvaluationDon
       )}
 
       {stage === "generating" && (
-        <p className="font-mono text-xs text-command-action">Writing test scenarios from the Skill Spec — realistic sample data with known answers…</p>
+        <div className="space-y-3" aria-live="polite">
+          <div className="flex items-center gap-3 rounded-lg border border-command-action/40 bg-command-action/5 px-4 py-3">
+            <span className="relative flex h-2.5 w-2.5 flex-none">
+              <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-command-action opacity-60 motion-reduce:animate-none" />
+              <span className="relative inline-flex h-2.5 w-2.5 rounded-full bg-command-action" />
+            </span>
+            <p className="min-w-0 truncate font-mono text-xs text-command-text" dir="auto">
+              {gen?.ticker ?? "Writing test scenarios from the Skill Spec — realistic sample data with known answers…"}
+            </p>
+            {gen ? (
+              <span className="ml-auto flex-none font-mono text-[11px] tabular-nums text-command-muted">{Math.max(0, Math.round((now - gen.since) / 1000))}s</span>
+            ) : null}
+          </div>
+          <div className="grid gap-3 md:grid-cols-3">
+            {(
+              [
+                { key: "contract", title: "Output format", note: "What a correct answer must look like" },
+                { key: "standard", title: "Test set 1 · standard", note: "Typical data, known answers" },
+                { key: "hard", title: "Test set 2 · hard", note: "Edge cases and traps" }
+              ] as const
+            ).map((item) => {
+              const st = gen?.[item.key] ?? "now";
+              return (
+                <div key={item.key} className="rounded-lg border border-command-border bg-command-bg/60 p-3">
+                  <div className="flex items-center justify-between gap-2">
+                    <p className="text-sm font-semibold text-command-text">{item.title}</p>
+                    <span
+                      className={`rounded-full border px-2 py-0.5 font-mono text-[10px] ${
+                        st === "done"
+                          ? "border-emerald-400/50 text-emerald-300"
+                          : st === "fail"
+                            ? "border-red-400/50 text-red-300"
+                            : "border-command-action/50 text-command-action"
+                      }`}
+                    >
+                      {st === "done" ? "✓ ready" : st === "fail" ? "failed" : "writing…"}
+                    </span>
+                  </div>
+                  <p className="mt-1 text-xs text-command-muted">{item.note}</p>
+                  <div className="mt-3 h-1 overflow-hidden rounded bg-command-border/40">
+                    {st === "now" ? (
+                      <div className="h-full w-2/5 animate-workBar rounded bg-gradient-to-r from-transparent via-command-action to-transparent" />
+                    ) : st === "done" ? (
+                      <div className="h-full w-full rounded bg-emerald-400/60" />
+                    ) : (
+                      <div className="h-full w-full rounded bg-red-400/50" />
+                    )}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
       )}
 
       {(stage === "running" || stage === "judging") && (
